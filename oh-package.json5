@@ -1,0 +1,11 @@
+{
+  "modelVersion": "5.0.0",
+  "name": "privacy_sentinel",
+  "version": "1.0.0",
+  "description": "Privacy Sentinel HarmonyOS ArkTS prototype",
+  "main": "",
+  "author": "Privacy Sentinel Team",
+  "license": "MIT",
+  "dependencies": {}
+}
+

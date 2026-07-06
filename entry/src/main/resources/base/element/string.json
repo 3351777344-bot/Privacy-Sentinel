@@ -1,0 +1,17 @@
+{
+  "string": [
+    {
+      "name": "app_name",
+      "value": "隐私哨兵"
+    },
+    {
+      "name": "module_desc",
+      "value": "Privacy Sentinel entry module"
+    },
+    {
+      "name": "entryability_desc",
+      "value": "Privacy Sentinel main ability"
+    }
+  ]
+}
+
