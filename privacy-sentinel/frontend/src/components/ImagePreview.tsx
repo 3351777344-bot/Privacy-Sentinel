@@ -41,7 +41,7 @@ export default function ImagePreview({ imageUrl, items = [], title, emptyText }:
         <span>02</span>
         <div>
           <h3>{title}</h3>
-          <p>敏感区域会随图片显示比例同步缩放。</p>
+          <p>隐私检测框会跟随图片显示比例同步缩放，便于现场讲解。</p>
         </div>
       </div>
       {imageUrl ? (
@@ -49,7 +49,7 @@ export default function ImagePreview({ imageUrl, items = [], title, emptyText }:
           <img
             ref={imageRef}
             src={imageUrl}
-            alt="待检测图片"
+            alt="待检测原图"
             onLoad={() => {
               const image = imageRef.current;
               if (!image) return;
@@ -72,7 +72,7 @@ export default function ImagePreview({ imageUrl, items = [], title, emptyText }:
                 height: item.box.height * scaleY
               }}
             >
-              <span>{item.label} · {riskText[item.riskLevel]}</span>
+              <span>{item.label} / {riskText[item.riskLevel]}</span>
             </div>
           ))}
         </div>

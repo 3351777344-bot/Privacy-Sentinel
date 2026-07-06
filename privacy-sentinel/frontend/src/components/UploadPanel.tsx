@@ -20,7 +20,7 @@ export default function UploadPanel({ loading, onDetect }: UploadPanelProps) {
         <span>01</span>
         <div>
           <h3>图片上传</h3>
-          <p>选择截图、快递单、订单页或聊天记录，先用 mock 检测跑通演示流程。</p>
+          <p>选择截图、快递单、订单页或聊天记录，先让 AI 扫描潜在隐私风险。</p>
         </div>
       </div>
       <div className="upload-box" onClick={() => inputRef.current?.click()}>
@@ -30,8 +30,9 @@ export default function UploadPanel({ loading, onDetect }: UploadPanelProps) {
           accept="image/*"
           onChange={(event) => setFile(event.target.files?.[0] ?? null)}
         />
+        <span className="upload-icon">+</span>
         <strong>{file ? file.name : '点击选择本地图片'}</strong>
-        <span>当前 Demo 不接付费大模型，检测项由后端 mock 生成。</span>
+        <span>支持常见图片格式，检测完成后会在原图上标注隐私框。</span>
       </div>
       <button className="primary-button" disabled={!file || loading} onClick={handleSubmit}>
         {loading ? 'AI 检测中...' : '开始隐私检测'}

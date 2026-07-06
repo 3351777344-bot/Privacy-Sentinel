@@ -12,7 +12,7 @@ export default function HistoryList({ records }: HistoryListProps) {
         <span>07</span>
         <div>
           <h3>最近检测记录</h3>
-          <p>用于展示分享前的安全检查闭环。</p>
+          <p>展示分享前安全检查的闭环记录，方便比赛演示连续流程。</p>
         </div>
       </div>
       {records.length === 0 ? (

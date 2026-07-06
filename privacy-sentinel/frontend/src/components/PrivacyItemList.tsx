@@ -11,16 +11,16 @@ export default function PrivacyItemList({ items }: PrivacyItemListProps) {
       <div className="section-title">
         <span>04</span>
         <div>
-          <h3>隐私检测项</h3>
-          <p>列表中的建议后续可接入 OCR、二维码识别和人脸检测。</p>
+          <h3>检测项列表</h3>
+          <p>逐项展示隐私类型、识别文本、风险等级和处理建议。</p>
         </div>
       </div>
       {items.length === 0 ? (
-        <p className="muted">暂无检测项。</p>
+        <p className="muted">暂无检测项。完成图片检测后会自动生成列表。</p>
       ) : (
         <div className="privacy-list">
           {items.map((item) => (
-            <article className="privacy-item" key={item.id}>
+            <article className={`privacy-item ${item.riskLevel}`} key={item.id}>
               <div>
                 <strong>{item.label}</strong>
                 <span>{item.text}</span>

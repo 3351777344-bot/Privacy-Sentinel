@@ -29,16 +29,16 @@ def detect_privacy_items(image_path: str, image_id: str, original_url: str) -> D
             text="138****1234",
             riskLevel="high",
             box=_box(width, height, 0.16, 0.23, 0.34, 0.07),
-            suggestion="手机号属于高风险隐私，建议隐藏后再分享。",
+            suggestion="手机号属于高风险隐私信息，建议遮盖后再分享。",
         ),
         PrivacyItem(
             id=f"{image_id}_address",
             type="address",
             label="收货地址",
-            text="北京市海淀区****科技园 8 号楼",
+            text="北京市海淀区***科技园 8 号楼",
             riskLevel="high",
             box=_box(width, height, 0.14, 0.39, 0.62, 0.08),
-            suggestion="详细地址可定位个人住址或活动范围，建议完整打码。",
+            suggestion="详细地址可能暴露个人住址或活动范围，建议完整打码。",
         ),
         PrivacyItem(
             id=f"{image_id}_qr",
@@ -56,7 +56,7 @@ def detect_privacy_items(image_path: str, image_id: str, original_url: str) -> D
             text="ORDER-20260706-8848",
             riskLevel="medium",
             box=_box(width, height, 0.17, 0.55, 0.45, 0.06),
-            suggestion="订单号可被用于查询交易信息，建议根据分享对象决定是否隐藏。",
+            suggestion="订单号可能被用于查询交易信息，建议根据分享对象决定是否隐藏。",
         ),
         PrivacyItem(
             id=f"{image_id}_nickname",

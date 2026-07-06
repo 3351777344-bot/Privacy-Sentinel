@@ -23,7 +23,7 @@ export default function RiskSummary({ result }: RiskSummaryProps) {
         <span>03</span>
         <div>
           <h3>风险概览</h3>
-          <p>优先处理高风险隐私，再决定是否继续分享。</p>
+          <p>检测完成后优先处理高风险信息，再决定是否继续分享。</p>
         </div>
       </div>
       {result ? (
@@ -34,13 +34,13 @@ export default function RiskSummary({ result }: RiskSummaryProps) {
           </div>
           <div className="stats-grid">
             <div><b>{result.items.length}</b><span>检测项</span></div>
-            <div><b>{counts.high}</b><span>高风险</span></div>
-            <div><b>{counts.medium}</b><span>中风险</span></div>
-            <div><b>{counts.low}</b><span>低风险</span></div>
+            <div className="stat-high"><b>{counts.high}</b><span>高风险</span></div>
+            <div className="stat-medium"><b>{counts.medium}</b><span>中风险</span></div>
+            <div className="stat-low"><b>{counts.low}</b><span>低风险</span></div>
           </div>
         </>
       ) : (
-        <p className="muted">上传图片后，这里会显示整体风险等级和检测摘要。</p>
+        <p className="muted">上传图片后，这里会展示整体风险等级、检测项数量和风险分布。</p>
       )}
     </section>
   );
