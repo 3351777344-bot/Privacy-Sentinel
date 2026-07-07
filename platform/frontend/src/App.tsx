@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  analyzeScamText,
+  analyzeCode,
   checkDoc,
   checkLink,
   detectImage,
@@ -18,22 +18,21 @@ import {
   RiskBadge,
   RiskReport,
   ScoreCard,
-  SuggestionList,
-  riskText
+  SuggestionList
 } from './components/RiskComponents';
 import UploadPanel from './components/UploadPanel';
 import type {
+  CodeAnalyzeResponse,
   DetectResult,
   DocCheckResponse,
   HistoryRecord,
   LinkCheckResponse,
   MaskType,
   RiskLevel,
-  ScamAnalyzeResponse,
   TextFinding
 } from './types/privacy';
 
-type Page = 'home' | 'privacy' | 'scam' | 'link' | 'doc';
+type Page = 'home' | 'privacy' | 'code' | 'link' | 'doc';
 type ToolPage = Exclude<Page, 'home'>;
 
 const modules: Array<{
@@ -45,39 +44,54 @@ const modules: Array<{
 }> = [
   {
     id: 'privacy',
-    title: '隐私哨兵',
-    subtitle: '图片分享前隐私检测与打码',
+    title: 'Privacy Sentinel 隐私哨兵',
+    subtitle: '图片隐私检测与打码',
     detail: '识别手机号、地址、二维码、头像、昵称等敏感区域，生成安全分享版本。',
     accent: 'blue'
   },
   {
-    id: 'scam',
-    title: '反诈雷达',
-    subtitle: '聊天文本诈骗风险识别',
-    detail: '识别诱导转账、高额回报、催促决策、脱离平台、隐瞒他人和可疑链接。',
+    id: 'code',
+    title: 'Code Guardian 代码卫士',
+    subtitle: '提交代码前的安全体检',
+    detail: '检测硬编码密钥、SQL 注入、命令执行、路径穿越、弱加密、敏感日志、危险配置和 XSS 风险。',
     accent: 'red'
   },
   {
     id: 'link',
-    title: '链接卫士',
-    subtitle: 'URL 体检与访问建议',
-    detail: '检查 HTTPS、短链接、可疑关键词、异常域名、过长 URL、随机字符和可疑参数。',
+    title: 'Link Guard 链接卫士',
+    subtitle: '链接与二维码安全体检',
+    detail: '从协议、域名、参数、关键词、随机 token 和来源场景生成完整链接安全报告。',
     accent: 'teal'
   },
   {
     id: 'doc',
-    title: '提交护盾',
-    subtitle: '材料提交前安全检查',
-    detail: '按提交要求、上传材料、生成报告的流程检查完整性、格式、隐私风险和评分。',
+    title: 'Doc Shield 提交护盾',
+    subtitle: '材料提交前检查',
+    detail: '检查提交要求、材料完整性、格式规范、隐私风险和提交建议。',
     accent: 'amber'
   }
 ];
 
-const sampleScamText =
-  '老师通知：奖学金补贴今日截止，请点击链接填写银行卡和验证码，逾期视为放弃。不要告诉其他同学，名额有限。';
+const sampleCode = `import os
+
+api_key = "sk-demo-hardcoded-secret"
+name = input("name:")
+sql = "SELECT * FROM users WHERE name = '" + name + "'"
+os.system("ping " + name)
+print("token", api_key)`;
 
 const sampleDocRequirement =
-  '课程论文提交要求：请于 2026年7月10日 18:00 前提交 PDF 文件，命名规则为 学号-姓名-课程论文。材料需包含封面、摘要、正文、参考文献；正文不少于 3000 字。';
+  '课程论文提交要求：请于 2026 年 7 月 10 日 18:00 前提交 PDF 文件，命名规则为 学号-姓名-课程论文。材料需包含封面、摘要、正文、参考文献；正文不少于 3000 字。';
+
+const languageOptions = [
+  { value: 'python', label: 'Python' },
+  { value: 'java', label: 'Java' },
+  { value: 'javascript', label: 'JavaScript / TypeScript' },
+  { value: 'sql', label: 'SQL' },
+  { value: 'other', label: 'Other' }
+];
+
+const sourceOptions = ['短信', '群聊', '邮件', '二维码', '二手交易', '客服', '学校通知', '陌生人私信', '其他'];
 
 function scoreFromRisk(level: RiskLevel) {
   if (level === 'high') return 48;
@@ -130,6 +144,26 @@ function evidenceFromPrivacy(result?: DetectResult | null): TextFinding[] {
   );
 }
 
+function evidenceFromCode(result?: CodeAnalyzeResponse | null): TextFinding[] {
+  return (
+    result?.vulnerabilities.map((item) => ({
+      label: item.line ? `${item.title} / 第 ${item.line} 行` : item.title,
+      evidence: `${item.snippet || '未截取到代码片段'}。${item.reason}`,
+      riskLevel: item.riskLevel
+    })) ?? []
+  );
+}
+
+function evidenceFromLink(result?: LinkCheckResponse | null): TextFinding[] {
+  return (
+    result?.checks.map((item) => ({
+      label: `${item.label} / ${item.status}`,
+      evidence: item.message,
+      riskLevel: item.riskLevel
+    })) ?? []
+  );
+}
+
 export default function App() {
   const [page, setPage] = useState<Page>('home');
   const [detectResult, setDetectResult] = useState<DetectResult | null>(null);
@@ -141,11 +175,15 @@ export default function App() {
   const [loadingMask, setLoadingMask] = useState(false);
   const [error, setError] = useState('');
 
-  const [scamText, setScamText] = useState(sampleScamText);
-  const [scamResult, setScamResult] = useState<ScamAnalyzeResponse | null>(null);
-  const [loadingScam, setLoadingScam] = useState(false);
+  const [codeText, setCodeText] = useState(sampleCode);
+  const [codeLanguage, setCodeLanguage] = useState('python');
+  const [codeFile, setCodeFile] = useState<File | null>(null);
+  const [codeResult, setCodeResult] = useState<CodeAnalyzeResponse | null>(null);
+  const [loadingCode, setLoadingCode] = useState(false);
 
-  const [url, setUrl] = useState('http://bit.ly/scholarship-verify?bank=1&code=login');
+  const [url, setUrl] = useState('https://example.com/login?redirect=pay&token=abc123abc123abc123abc123');
+  const [linkSource, setLinkSource] = useState('短信');
+  const [qrFile, setQrFile] = useState<File | null>(null);
   const [linkResult, setLinkResult] = useState<LinkCheckResponse | null>(null);
   const [loadingLink, setLoadingLink] = useState(false);
 
@@ -171,11 +209,11 @@ export default function App() {
     () =>
       overallScore(mergedHistory, [
         privacyScore(detectResult),
-        scamResult?.score,
-        linkResult ? scoreFromRisk(linkResult.riskLevel) : undefined,
+        codeResult?.score,
+        linkResult?.score,
         docResult?.score
       ]),
-    [detectResult, docResult, linkResult, mergedHistory, scamResult]
+    [detectResult, docResult, linkResult, mergedHistory, codeResult]
   );
 
   const moduleStatus = useMemo(() => {
@@ -185,15 +223,15 @@ export default function App() {
         score: privacyScore(detectResult) ?? (history[0] ? scoreFromRisk(history[0].riskLevel) : 92),
         status: detectResult ? detectResult.summary : history[0]?.summary ?? '等待图片检测'
       },
-      scam: {
-        riskLevel: scamResult?.riskLevel ?? ('low' as RiskLevel),
-        score: scamResult?.score ?? 92,
-        status: scamResult ? `识别到 ${scamResult.reasons.length} 条风险证据` : '等待文本分析'
+      code: {
+        riskLevel: codeResult?.riskLevel ?? ('low' as RiskLevel),
+        score: codeResult?.score ?? 92,
+        status: codeResult ? `发现 ${codeResult.vulnerabilities.length} 项代码风险` : '等待代码检测'
       },
       link: {
         riskLevel: linkResult?.riskLevel ?? ('low' as RiskLevel),
-        score: linkResult ? scoreFromRisk(linkResult.riskLevel) : 92,
-        status: linkResult ? `完成 ${linkResult.checks.length} 项链接体检` : '等待 URL 体检'
+        score: linkResult?.score ?? 92,
+        status: linkResult ? `完成 ${linkResult.checks.length} 项链接体检` : '等待链接体检'
       },
       doc: {
         riskLevel: docResult?.riskLevel ?? ('low' as RiskLevel),
@@ -201,7 +239,7 @@ export default function App() {
         status: docResult?.summary ?? '等待材料检查'
       }
     };
-  }, [detectResult, docResult, history, linkResult, scamResult]);
+  }, [detectResult, docResult, history, linkResult, codeResult]);
 
   async function handleDetect(file: File) {
     setLoadingDetect(true);
@@ -222,7 +260,6 @@ export default function App() {
     if (!detectResult) return;
     setLoadingMask(true);
     setError('');
-
     const selectedItems = detectResult.items
       .filter((item) => {
         if (scope === 'all') return true;
@@ -242,20 +279,24 @@ export default function App() {
     }
   }
 
-  async function handleScamAnalyze() {
-    setLoadingScam(true);
+  async function handleCodeAnalyze() {
+    if (codeFile?.name.toLowerCase().endsWith('.zip')) {
+      setError('项目级扫描为后续扩展功能，请先上传单个代码文件或粘贴代码。');
+      return;
+    }
+    setLoadingCode(true);
     setError('');
     try {
-      const result = await analyzeScamText(scamText);
-      setScamResult(result);
+      const result = await analyzeCode(codeLanguage, codeText, codeFile);
+      setCodeResult(result);
       setSessionHistory((current) => [
-        makeHistoryRecord('反诈雷达', result.riskLevel, `诈骗风险分析：${riskText[result.riskLevel]}`),
+        makeHistoryRecord('Code Guardian 代码卫士', result.riskLevel, result.summary),
         ...current
       ]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '反诈分析失败，请稍后重试。');
+      setError(err instanceof Error ? err.message : '代码安全检测失败，请稍后重试。');
     } finally {
-      setLoadingScam(false);
+      setLoadingCode(false);
     }
   }
 
@@ -263,14 +304,14 @@ export default function App() {
     setLoadingLink(true);
     setError('');
     try {
-      const result = await checkLink(url);
+      const result = await checkLink(url, linkSource);
       setLinkResult(result);
       setSessionHistory((current) => [
-        makeHistoryRecord('链接卫士', result.riskLevel, `链接体检：${result.normalizedUrl}`),
+        makeHistoryRecord('Link Guard 链接卫士', result.riskLevel, result.summary),
         ...current
       ]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '链接检测失败，请稍后重试。');
+      setError(err instanceof Error ? err.message : '链接安全体检失败，请稍后重试。');
     } finally {
       setLoadingLink(false);
     }
@@ -283,7 +324,7 @@ export default function App() {
       const result = await checkDoc(docRequirement, docFiles);
       setDocResult(result);
       setSessionHistory((current) => [
-        makeHistoryRecord('提交护盾', result.riskLevel, result.summary),
+        makeHistoryRecord('Doc Shield 提交护盾', result.riskLevel, result.summary),
         ...current
       ]);
     } catch (err) {
@@ -320,10 +361,9 @@ export default function App() {
             <div className="hero-copy">
               <p className="eyebrow">GuardianHub / AI Digital Safety Platform</p>
               <h1>安全中心</h1>
-              <h2>统一的 AI 数字安全防护平台</h2>
+              <h2>面向高校场景的 AI 数字安全防护平台</h2>
               <p className="header-copy">
-                GuardianHub 面向高校与个人数字生活场景，把图片分享、聊天反诈、链接访问、材料提交四类高频风险整合到同一个安全中心。
-                当前版本基于本地规则和可解释报告运行，不接入付费大模型 API，也不强依赖复杂 OCR。
+                GuardianHub 将图片隐私检测、代码安全检测、链接安全体检和材料提交检查整合到同一平台。当前版本基于本地规则、正则和关键词运行，适合比赛演示与离线 Demo。
               </p>
             </div>
             <ScoreCard score={score} title="今日安全评分" />
@@ -331,16 +371,16 @@ export default function App() {
 
           <section className="intro card">
             <div>
-              <h3>从四个安全工具升级为统一安全平台</h3>
+              <h3>从提交前、打开前、分享前建立统一防护</h3>
               <p>
-                平台以“分享前、点击前、转账前、提交前”为防护节点，统一输出 high / medium / low 风险等级、0-100 安全评分、风险证据和建议操作。
+                平台统一输出 high / medium / low 风险等级、0-100 安全评分、风险证据和建议操作，让学生项目、课程材料和日常链接都能先体检再处理。
               </p>
             </div>
             <div className="intro-tags">
-              <span>统一风险报告</span>
-              <span>本地规则可解释</span>
-              <span>卡片式安全中心</span>
-              <span>高校场景优先</span>
+              <span>图片隐私检测</span>
+              <span>代码安全检测</span>
+              <span>链接安全体检</span>
+              <span>材料提交检查</span>
             </div>
           </section>
 
@@ -399,8 +439,8 @@ export default function App() {
         <>
           <PageHero
             eyebrow="Privacy Sentinel"
-            title="隐私哨兵"
-            copy="图片分享前隐私检测与打码，保留原有图片检测、标注、处理和历史记录能力，并增加处理前后对比与检测报告。"
+            title="Privacy Sentinel 隐私哨兵"
+            copy="图片分享前先识别敏感区域并打码，保留原有上传、检测、标注、处理和历史记录能力。"
             onBack={() => setPage('home')}
           />
           <div className="workflow-grid">
@@ -410,7 +450,7 @@ export default function App() {
                 imageUrl={toAssetUrl(detectResult?.originalImageUrl)}
                 items={detectResult?.items}
                 title="原图与隐私检测框"
-                emptyText="上传图片后，这里会展示原图和 AI 标注出的隐私检测框。"
+                emptyText="上传图片后，这里会展示原图和标注出的隐私检测框。"
               />
             </div>
             <div className="right-column">
@@ -464,12 +504,12 @@ export default function App() {
         </>
       )}
 
-      {page === 'scam' && (
+      {page === 'code' && (
         <>
           <PageHero
-            eyebrow="Scam Radar"
-            title="反诈雷达"
-            copy="输入聊天文本，识别诱导转账、高额回报、催促决策、脱离平台、隐瞒他人、可疑链接等诈骗风险。"
+            eyebrow="Code Guardian"
+            title="Code Guardian 代码卫士"
+            copy="提交代码之前，先检查潜在安全风险。"
             onBack={() => setPage('home')}
           />
           <div className="tool-grid">
@@ -477,23 +517,60 @@ export default function App() {
               <div className="section-title">
                 <span>01</span>
                 <div>
-                  <h3>聊天文本分析</h3>
-                  <p>粘贴聊天记录或 OCR 后的截图文本，系统会输出风险证据和防骗建议。</p>
+                  <h3>代码输入区</h3>
+                  <p>粘贴代码或上传单个代码文件，当前不强制支持 zip 项目扫描。</p>
                 </div>
               </div>
-              <textarea value={scamText} onChange={(event) => setScamText(event.target.value)} />
-              <button className="primary-button" disabled={loadingScam || !scamText.trim()} onClick={handleScamAnalyze}>
-                {loadingScam ? '分析中...' : '开始风险识别'}
+              <label className="field-label">
+                代码语言
+                <select value={codeLanguage} onChange={(event) => setCodeLanguage(event.target.value)}>
+                  {languageOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <textarea value={codeText} onChange={(event) => setCodeText(event.target.value)} />
+              <label className="upload-box doc-upload-box">
+                <input
+                  type="file"
+                  accept=".py,.java,.js,.ts,.sql,.txt,.zip"
+                  onChange={(event) => setCodeFile(event.target.files?.[0] ?? null)}
+                />
+                <span className="upload-icon">+</span>
+                <strong>{codeFile ? codeFile.name : '选择单个代码文件'}</strong>
+                <span>.py / .java / .js / .ts / .sql / .txt；zip 为后续扩展功能</span>
+              </label>
+              {codeFile?.name.toLowerCase().endsWith('.zip') && (
+                <p className="muted">当前版本暂不解析 zip 项目包，请上传单个代码文件或直接粘贴核心代码片段。</p>
+              )}
+              <button
+                className="primary-button"
+                disabled={loadingCode || (!codeText.trim() && !codeFile)}
+                onClick={handleCodeAnalyze}
+              >
+                {loadingCode ? '检测中...' : '开始代码安全检测'}
               </button>
             </section>
-            <RiskReport
-              title="诈骗风险报告"
-              riskLevel={scamResult?.riskLevel}
-              score={scamResult?.score}
-              summary={scamResult ? `识别到 ${scamResult.reasons.length} 条风险证据。` : undefined}
-              evidence={scamResult?.reasons}
-              suggestions={scamResult?.suggestions}
-            />
+            <div className="report-stack">
+              <RiskReport
+                title="代码安全体检报告"
+                riskLevel={codeResult?.riskLevel}
+                score={codeResult?.score}
+                summary={codeResult?.summary}
+                evidence={evidenceFromCode(codeResult)}
+                suggestions={codeResult?.suggestions}
+              />
+              {codeResult && (
+                <DecisionCard
+                  title="是否建议直接提交代码"
+                  ok={codeResult.shouldSubmit}
+                  positive="可以提交"
+                  negative={codeResult.riskLevel === 'high' ? '不建议提交' : '建议修复后提交'}
+                />
+              )}
+            </div>
           </div>
         </>
       )}
@@ -502,8 +579,8 @@ export default function App() {
         <>
           <PageHero
             eyebrow="Link Guard"
-            title="链接卫士"
-            copy="输入 URL 生成链接体检报告，检查 HTTPS、短链接、可疑关键词、异常域名、URL 过长、随机字符和可疑参数。"
+            title="Link Guard 链接卫士"
+            copy="打开链接之前，先做一次安全体检。"
             onBack={() => setPage('home')}
           />
           <div className="tool-grid">
@@ -511,23 +588,69 @@ export default function App() {
               <div className="section-title">
                 <span>01</span>
                 <div>
-                  <h3>URL 体检</h3>
-                  <p>二维码解析出的链接也可以粘贴到这里进行本地规则检测。</p>
+                  <h3>链接安全体检</h3>
+                  <p>输入 URL、短链接、二维码解析出的内容或链接来源说明。</p>
                 </div>
               </div>
               <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com" />
+              <label className="field-label">
+                链接来源
+                <select value={linkSource} onChange={(event) => setLinkSource(event.target.value)}>
+                  {sourceOptions.map((source) => (
+                    <option key={source} value={source}>
+                      {source}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="upload-box doc-upload-box">
+                <input type="file" accept="image/*" onChange={(event) => setQrFile(event.target.files?.[0] ?? null)} />
+                <span className="upload-icon">+</span>
+                <strong>{qrFile ? qrFile.name : '二维码图片占位上传'}</strong>
+                <span>当前版本暂不解析二维码图片，请手动输入二维码解析出的链接。</span>
+              </label>
               <button className="primary-button" disabled={loadingLink || !url.trim()} onClick={handleLinkCheck}>
-                {loadingLink ? '检测中...' : '生成链接体检报告'}
+                {loadingLink ? '体检中...' : '开始链接安全体检'}
               </button>
             </section>
-            <RiskReport
-              title="链接体检报告"
-              riskLevel={linkResult?.riskLevel}
-              score={linkResult ? scoreFromRisk(linkResult.riskLevel) : undefined}
-              summary={linkResult ? `标准化链接：${linkResult.normalizedUrl}` : undefined}
-              evidence={linkResult?.checks}
-              suggestions={linkResult?.suggestions}
-            />
+            <div className="report-stack">
+              <RiskReport
+                title="链接安全体检报告"
+                riskLevel={linkResult?.riskLevel}
+                score={linkResult?.score}
+                summary={linkResult?.summary}
+                evidence={evidenceFromLink(linkResult)}
+                suggestions={linkResult?.suggestions}
+              />
+              {linkResult && (
+                <>
+                  <section className="card detail-card">
+                    <div className="section-title">
+                      <span>P</span>
+                      <div>
+                        <h3>可疑参数与来源风险</h3>
+                        <p>{linkResult.normalizedUrl}</p>
+                      </div>
+                    </div>
+                    <EvidenceList
+                      evidence={[
+                        ...linkResult.suspiciousParams.map((item) => ({
+                          label: item.name,
+                          evidence: item.reason,
+                          riskLevel: item.riskLevel
+                        })),
+                        {
+                          label: `来源场景：${linkResult.sourceRisk.source}`,
+                          evidence: linkResult.sourceRisk.reason,
+                          riskLevel: linkResult.sourceRisk.riskLevel
+                        }
+                      ]}
+                    />
+                  </section>
+                  <DecisionCard title="是否建议打开链接" ok={linkResult.shouldOpen} positive="可以谨慎打开" negative="不建议直接打开" />
+                </>
+              )}
+            </div>
           </div>
         </>
       )}
@@ -536,8 +659,8 @@ export default function App() {
         <>
           <PageHero
             eyebrow="Doc Shield"
-            title="提交护盾"
-            copy="按照“输入提交要求 + 上传材料 + 生成提交检查报告”的逻辑，检查材料完整性、格式规范、隐私风险、提交建议和安全评分。"
+            title="Doc Shield 提交护盾"
+            copy="按“输入提交要求 + 上传材料 + 生成提交检查报告”的流程，检查材料完整性、格式规范、隐私风险、提交建议和安全评分。"
             onBack={() => setPage('home')}
           />
           <div className="tool-grid doc-tool-grid">
@@ -623,6 +746,26 @@ function ImageCompareCard({ title, imageUrl }: { title: string; imageUrl: string
       <strong>{title}</strong>
       <img src={imageUrl} alt={title} />
     </div>
+  );
+}
+
+function DecisionCard({
+  title,
+  ok,
+  positive,
+  negative
+}: {
+  title: string;
+  ok: boolean;
+  positive: string;
+  negative: string;
+}) {
+  return (
+    <section className={`card decision-card ${ok ? 'low' : 'high'}`}>
+      <strong>{title}</strong>
+      <RiskBadge level={ok ? 'low' : 'high'} compact />
+      <p>{ok ? positive : negative}</p>
+    </section>
   );
 }
 

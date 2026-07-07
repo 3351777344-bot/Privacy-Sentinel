@@ -47,18 +47,57 @@ export interface TextFinding {
   riskLevel: RiskLevel;
 }
 
-export interface ScamAnalyzeResponse {
+export interface CodeVulnerability {
+  id: string;
+  type: string;
+  title: string;
+  riskLevel: RiskLevel;
+  line?: number | null;
+  snippet: string;
+  reason: string;
+  suggestion: string;
+}
+
+export interface CodeAnalyzeResponse {
   riskLevel: RiskLevel;
   score: number;
-  reasons: TextFinding[];
+  summary: string;
+  language: string;
+  vulnerabilities: CodeVulnerability[];
   suggestions: string[];
+  shouldSubmit: boolean;
+}
+
+export interface LinkCheckItem {
+  id: string;
+  label: string;
+  status: 'pass' | 'warning' | 'fail';
+  riskLevel: RiskLevel;
+  message: string;
+}
+
+export interface SuspiciousParam {
+  name: string;
+  riskLevel: RiskLevel;
+  reason: string;
+}
+
+export interface SourceRisk {
+  source: string;
+  riskLevel: RiskLevel;
+  reason: string;
 }
 
 export interface LinkCheckResponse {
   riskLevel: RiskLevel;
+  score: number;
+  summary: string;
   normalizedUrl: string;
-  checks: TextFinding[];
+  checks: LinkCheckItem[];
+  suspiciousParams: SuspiciousParam[];
+  sourceRisk: SourceRisk;
   suggestions: string[];
+  shouldOpen: boolean;
 }
 
 export interface DocCheckResponse {

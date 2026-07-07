@@ -4,9 +4,8 @@ import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
@@ -15,13 +14,16 @@ from detector.mock_detector import detect_privacy_items
 from image_processor.blur import apply_blur_mask
 from image_processor.mask import apply_black_mask
 from image_processor.mosaic import apply_mosaic_mask
+from modules.code_guardian.analyzer import analyze_code as run_code_guardian
 from modules.doc_shield.completeness_checker import check_completeness
 from modules.doc_shield.file_extractor import extract_file
 from modules.doc_shield.format_checker import check_format
 from modules.doc_shield.privacy_checker import check_privacy
 from modules.doc_shield.report_generator import generate_report
 from modules.doc_shield.requirement_parser import parse_requirement
+from modules.link_guard.analyzer import analyze_link as run_link_guard
 from schemas.models import (
+    CodeAnalyzeResponse,
     DetectResponse,
     DocCheckResponse,
     HistoryRecord,
@@ -45,7 +47,7 @@ for directory in [UPLOAD_DIR, PROCESSED_DIR, HISTORY_FILE.parent]:
 if not HISTORY_FILE.exists():
     HISTORY_FILE.write_text("[]", encoding="utf-8")
 
-app = FastAPI(title="GuardianHub API", version="0.4.0")
+app = FastAPI(title="GuardianHub API", version="0.5.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -96,6 +98,15 @@ def _level_from_score(score: int) -> str:
     if score >= 35:
         return "medium"
     return "low"
+
+
+def _decode_upload(content: bytes) -> str:
+    for encoding in ("utf-8", "utf-8-sig", "gb18030"):
+        try:
+            return content.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return content.decode("utf-8", errors="ignore")
 
 
 @app.get("/api/health")
@@ -168,8 +179,44 @@ def history() -> list[HistoryRecord]:
     return [HistoryRecord(**record) for record in _load_history()]
 
 
+@app.post("/api/code/analyze", response_model=CodeAnalyzeResponse)
+async def analyze_code(request: Request) -> CodeAnalyzeResponse:
+    content_type = request.headers.get("content-type", "")
+    language: str | None = None
+    filename: str | None = None
+    code = ""
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        language_value = form.get("language")
+        language = str(language_value) if language_value is not None else None
+        upload = form.get("file")
+        if upload is None or not hasattr(upload, "read"):
+            raise HTTPException(status_code=400, detail="请上传单个代码文件。")
+        filename = getattr(upload, "filename", "") or ""
+        extension = Path(filename).suffix.lower()
+        if extension == ".zip":
+            raise HTTPException(status_code=400, detail="项目级 zip 扫描为后续扩展功能，请先上传单个代码文件。")
+        if extension not in {".py", ".java", ".js", ".ts", ".sql", ".txt"}:
+            raise HTTPException(status_code=400, detail="当前仅支持 .py、.java、.js、.ts、.sql、.txt 文件。")
+        code = _decode_upload(await upload.read())
+    else:
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="请提交 JSON 或 multipart/form-data 请求。")
+        language = payload.get("language")
+        code = str(payload.get("code") or "")
+
+    if not code.strip():
+        raise HTTPException(status_code=400, detail="请输入或上传需要检测的代码。")
+
+    return CodeAnalyzeResponse(**run_code_guardian(code=code, language=language, filename=filename))
+
+
 @app.post("/api/scam/analyze", response_model=ScamAnalyzeResponse)
 def analyze_scam(request: ScamAnalyzeRequest) -> ScamAnalyzeResponse:
+    """Archived compatibility endpoint. The frontend no longer displays this legacy module."""
     text = request.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="请输入需要分析的聊天文本。")
@@ -177,9 +224,9 @@ def analyze_scam(request: ScamAnalyzeRequest) -> ScamAnalyzeResponse:
     rules = [
         ("索要验证码", r"验证码|短信码|校验码|动态码", 35, "high"),
         ("诱导转账", r"转账|汇款|垫付|保证金|手续费|刷流水|解冻金|押金", 35, "high"),
-        ("高额回报", r"高额回报|稳赚|保本|返利|日结|佣金|躺赚|中奖|补贴|奖学金|返现|退款", 30, "high"),
+        ("高额回报", r"高额回报|稳赚|保本|返利|日结|佣金|中奖|补贴|奖学金|返现", 30, "high"),
         ("催促决策", r"截止|逾期|马上|立即|最后\s*机会|今日.*失效|限时|名额有限", 20, "medium"),
-        ("脱离平台", r"加微信|加QQ|私聊|扫码进群|下载.*app|不要在平台|绕过平台|线下交易", 30, "high"),
+        ("脱离平台", r"加微信|加QQ|私聊|扫码进群|下载.*app|绕过平台|线下交易", 30, "high"),
         ("隐瞒他人", r"不要告诉|别告诉|保密|悄悄|不要和.*说|只告诉你", 25, "medium"),
         ("冒充身份", r"客服|老师|辅导员|学工|银行|公安|法院|平台审核", 20, "medium"),
         ("可疑链接", r"https?://|点击链接|扫码|二维码|短链接|bit\.ly|tinyurl", 25, "medium"),
@@ -209,91 +256,11 @@ def analyze_scam(request: ScamAnalyzeRequest) -> ScamAnalyzeResponse:
     return ScamAnalyzeResponse(riskLevel=risk_level, score=min(score, 100), reasons=reasons, suggestions=suggestions)
 
 
-def _has_random_segment(path: str) -> bool:
-    segments = [segment for segment in path.split("/") if len(segment) >= 14]
-    return any(
-        bool(re.fullmatch(r"[A-Za-z0-9_-]+", segment))
-        and sum(char.isdigit() for char in segment) >= 4
-        and sum(char.isalpha() for char in segment) >= 4
-        for segment in segments
-    )
-
-
 @app.post("/api/link/check", response_model=LinkCheckResponse)
 def check_link(request: LinkCheckRequest) -> LinkCheckResponse:
-    raw_url = request.url.strip()
-    if not raw_url:
+    if not request.url.strip():
         raise HTTPException(status_code=400, detail="请输入需要检测的 URL。")
-
-    normalized_url = raw_url if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", raw_url) else f"http://{raw_url}"
-    parsed = urlparse(normalized_url)
-    domain = parsed.hostname or ""
-    checks: list[TextFinding] = []
-    score = 0
-
-    if parsed.scheme != "https":
-        score += 25
-        checks.append(TextFinding(label="未使用 HTTPS", evidence=parsed.scheme or "缺少协议", riskLevel="medium"))
-    else:
-        checks.append(TextFinding(label="HTTPS 检查通过", evidence="链接使用 HTTPS 加密传输。", riskLevel="low"))
-
-    short_domains = {"bit.ly", "t.co", "tinyurl.com", "goo.gl", "ow.ly", "is.gd", "buff.ly", "suo.im"}
-    if domain.lower() in short_domains:
-        score += 35
-        checks.append(TextFinding(label="短链接风险", evidence=domain, riskLevel="high"))
-
-    suspicious_keywords = [
-        "login",
-        "verify",
-        "gift",
-        "bonus",
-        "free",
-        "pay",
-        "bank",
-        "password",
-        "scholarship",
-        "refund",
-        "奖学金",
-        "补贴",
-        "登录",
-        "验证",
-    ]
-    hit_keywords = [keyword for keyword in suspicious_keywords if keyword.lower() in normalized_url.lower()]
-    if hit_keywords:
-        score += 25
-        checks.append(TextFinding(label="可疑关键词", evidence="、".join(hit_keywords), riskLevel="medium"))
-
-    is_ip = bool(re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", domain))
-    has_many_hyphens = domain.count("-") >= 3
-    lacks_dot = "." not in domain
-    is_punycode = "xn--" in domain
-    if is_ip or has_many_hyphens or lacks_dot or is_punycode:
-        score += 30
-        checks.append(TextFinding(label="异常域名", evidence=domain or "无法解析域名", riskLevel="high"))
-
-    if len(normalized_url) > 140:
-        score += 15
-        checks.append(TextFinding(label="URL 过长", evidence=f"长度 {len(normalized_url)}，可能隐藏跳转或追踪参数。", riskLevel="medium"))
-
-    if _has_random_segment(parsed.path):
-        score += 20
-        checks.append(TextFinding(label="随机字符路径", evidence=parsed.path[:120], riskLevel="medium"))
-
-    query = parse_qs(parsed.query)
-    suspicious_params = {"token", "code", "auth", "redirect", "url", "bank", "password", "verify", "callback"}
-    hit_params = [key for key in query if key.lower() in suspicious_params]
-    if hit_params:
-        score += 20
-        checks.append(TextFinding(label="可疑参数", evidence="、".join(hit_params), riskLevel="medium"))
-
-    risk_level = _level_from_score(score)
-    suggestions = {
-        "high": ["不要直接打开该链接。", "使用学校或服务商官网入口重新访问。", "如来自聊天消息，先向发送者线下确认。"],
-        "medium": ["打开前核对域名和页面证书。", "不要在该页面填写验证码、密码、身份证或银行卡。"],
-        "low": ["当前基础规则未发现明显风险。", "仍建议确认页面来源和收件上下文。"],
-    }[risk_level]
-
-    return LinkCheckResponse(riskLevel=risk_level, normalizedUrl=normalized_url, checks=checks, suggestions=suggestions)
+    return LinkCheckResponse(**run_link_guard(request.url, request.source))
 
 
 @app.post("/api/doc/check", response_model=DocCheckResponse)

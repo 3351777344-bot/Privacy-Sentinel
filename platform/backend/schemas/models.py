@@ -58,6 +58,32 @@ class TextFinding(BaseModel):
     riskLevel: RiskLevel
 
 
+class CodeAnalyzeRequest(BaseModel):
+    language: Optional[str] = None
+    code: str
+
+
+class CodeVulnerability(BaseModel):
+    id: str
+    type: str
+    title: str
+    riskLevel: RiskLevel
+    line: Optional[int] = None
+    snippet: str
+    reason: str
+    suggestion: str
+
+
+class CodeAnalyzeResponse(BaseModel):
+    riskLevel: RiskLevel
+    score: int
+    summary: str
+    language: str
+    vulnerabilities: List[CodeVulnerability]
+    suggestions: List[str]
+    shouldSubmit: bool
+
+
 class ScamAnalyzeRequest(BaseModel):
     text: str
 
@@ -71,13 +97,39 @@ class ScamAnalyzeResponse(BaseModel):
 
 class LinkCheckRequest(BaseModel):
     url: str
+    source: Optional[str] = "其他"
+
+
+class LinkCheckItem(BaseModel):
+    id: str
+    label: str
+    status: Literal["pass", "warning", "fail"]
+    riskLevel: RiskLevel
+    message: str
+
+
+class SuspiciousParam(BaseModel):
+    name: str
+    riskLevel: RiskLevel
+    reason: str
+
+
+class SourceRisk(BaseModel):
+    source: str
+    riskLevel: RiskLevel
+    reason: str
 
 
 class LinkCheckResponse(BaseModel):
     riskLevel: RiskLevel
+    score: int
+    summary: str
     normalizedUrl: str
-    checks: List[TextFinding]
+    checks: List[LinkCheckItem]
+    suspiciousParams: List[SuspiciousParam]
+    sourceRisk: SourceRisk
     suggestions: List[str]
+    shouldOpen: bool
 
 
 class ParsedRequirements(BaseModel):

@@ -25,6 +25,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -559,7 +560,8 @@ h2 {
 }
 
 .form-card textarea,
-.form-card input {
+.form-card input,
+.form-card select {
   background: #f8fafc;
   border: 1px solid #d8e3ef;
   border-radius: 8px;
@@ -575,9 +577,54 @@ h2 {
 }
 
 .form-card textarea:focus,
-.form-card input:focus {
+.form-card input:focus,
+.form-card select:focus {
   border-color: #2563eb;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.field-label {
+  color: #334155;
+  display: grid;
+  font-size: 13px;
+  font-weight: 900;
+  gap: 7px;
+  margin: 12px 0;
+}
+
+.report-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.detail-card {
+  padding: 18px;
+}
+
+.decision-card {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr auto;
+  padding: 18px;
+}
+
+.decision-card strong {
+  color: #111827;
+  font-size: 17px;
+}
+
+.decision-card p {
+  color: #435066;
+  grid-column: 1 / -1;
+}
+
+.decision-card.low {
+  border-left: 4px solid #10b981;
+}
+
+.decision-card.high {
+  border-left: 4px solid #dc2626;
 }
 
 .capability-list {

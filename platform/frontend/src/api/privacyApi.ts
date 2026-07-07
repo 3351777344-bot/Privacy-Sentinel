@@ -1,12 +1,12 @@
 import type {
   Box,
+  CodeAnalyzeResponse,
   DetectResult,
   DocCheckResponse,
   HistoryRecord,
   LinkCheckResponse,
   MaskResponse,
-  MaskType,
-  ScamAnalyzeResponse
+  MaskType
 } from '../types/privacy';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
@@ -48,20 +48,31 @@ export async function fetchHistory(): Promise<HistoryRecord[]> {
   return parseResponse<HistoryRecord[]>(response);
 }
 
-export async function analyzeScamText(text: string): Promise<ScamAnalyzeResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/scam/analyze`, {
+export async function analyzeCode(language: string, code: string, file?: File | null): Promise<CodeAnalyzeResponse> {
+  if (file) {
+    const formData = new FormData();
+    formData.append('language', language);
+    formData.append('file', file);
+    const response = await fetch(`${API_BASE_URL}/api/code/analyze`, {
+      method: 'POST',
+      body: formData
+    });
+    return parseResponse<CodeAnalyzeResponse>(response);
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/code/analyze`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text })
+    body: JSON.stringify({ language, code })
   });
-  return parseResponse<ScamAnalyzeResponse>(response);
+  return parseResponse<CodeAnalyzeResponse>(response);
 }
 
-export async function checkLink(url: string): Promise<LinkCheckResponse> {
+export async function checkLink(url: string, source: string): Promise<LinkCheckResponse> {
   const response = await fetch(`${API_BASE_URL}/api/link/check`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url })
+    body: JSON.stringify({ url, source })
   });
   return parseResponse<LinkCheckResponse>(response);
 }
