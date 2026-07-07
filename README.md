@@ -1,41 +1,25 @@
-# GuardianHub：面向高校场景的 AI 数字安全防护平台
+# GuardianHub
 
-当前主要运行和维护的 PC Web Demo 项目位于：
+GuardianHub 是面向高校场景的数字安全防护平台 Demo，当前 PC Web 项目位于：
 
 ```text
 platform/
 ```
 
-该目录内包含 GuardianHub 平台的后端、前端、文档和项目级 README。Privacy Sentinel 保留为平台中的“隐私哨兵”模块名称：
-
-```text
-platform/
-├── backend/
-├── frontend/
-├── docs/
-└── README.md
-```
-
-外层目录仅作为仓库总目录使用。旧 HarmonyOS 工程和 Codex 运行临时文件已归档到 `_archive/`，不会影响当前 PC Web Demo 的启动和维护。
-
-## 当前主项目
+## 当前项目
 
 - 后端：`platform/backend`
 - 前端：`platform/frontend`
 - 文档：`platform/docs`
-- 项目说明：`platform/README.md`
+
+旧 HarmonyOS 工程和历史运行文件已归档到 `_archive/`，不影响当前 PC Web Demo 启动。
 
 ## 平台模块
 
 - Privacy Sentinel 隐私哨兵：图片分享前隐私检测与一键打码。
-- Scam Radar 反诈雷达：聊天文本 / 聊天截图 OCR 文本中的诈骗风险识别。
-- Link Guard 链接卫士：URL 和二维码解析链接的风险检测。
-- Doc Shield 提交护盾：作业、报名材料、报告提交前的隐私与格式检查。
-
-## 归档目录
-
-- `_archive/harmonyos-old/`：旧 HarmonyOS / ArkTS 工程文件。
-- `_archive/codex-work/`：Codex 工作目录和本地运行日志。
+- Scam Radar 反诈雷达：聊天文本中的诈骗话术风险识别。
+- Link Guard 链接卫士：URL 风险检测。
+- Doc Shield 提交护盾：根据提交要求检查材料完整性、文件格式、命名规范，并识别文档隐私风险，生成提交前检查报告。
 
 ## 启动命令
 

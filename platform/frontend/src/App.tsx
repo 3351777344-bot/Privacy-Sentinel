@@ -66,11 +66,14 @@ const modules: Array<{
     subtitle: '作业、报名材料、报告提交前检查',
     detail: '展示文件命名、隐私内容、材料清单三类提交前自检能力。',
     accent: 'amber',
-    status: 'Mock'
+    status: '已接入'
   }
 ];
 
 const sampleScamText = '老师通知：奖学金补贴今日截止，请点击链接填写银行卡和验证码，逾期视为放弃。';
+
+const sampleDocRequirement =
+  '课程论文提交要求：请于 2026年7月20日 18:00 前提交 PDF 文件，命名规则为 学号-姓名-课程论文。材料需包含封面、摘要、正文、参考文献；正文不少于3000字。';
 
 function riskScore(records: HistoryRecord[]) {
   const penalty = records.slice(0, 5).reduce((total, record) => {
@@ -142,6 +145,102 @@ function ResultPanel({
   );
 }
 
+function DocReportPanel({ result }: { result: DocCheckResponse | null }) {
+  const checksByCategory = {
+    completeness: result?.checks.filter((item) => item.category === 'completeness') ?? [],
+    format: result?.checks.filter((item) => item.category === 'format') ?? [],
+    privacy: result?.checks.filter((item) => item.category === 'privacy') ?? []
+  };
+
+  if (!result) {
+    return (
+      <section className="card result-card doc-report">
+        <div className="section-title">
+          <span>R</span>
+          <div>
+            <h3>提交前检查报告</h3>
+            <p>上传材料并开始检查后，这里会展示解析要求、完整性、格式命名、隐私风险和修改建议。</p>
+          </div>
+        </div>
+        <p className="muted">等待生成报告。</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="card result-card doc-report">
+      <div className="section-title">
+        <span>R</span>
+        <div>
+          <h3>提交前检查报告</h3>
+          <p>{result.summary}</p>
+        </div>
+      </div>
+
+      <div className={`risk-banner ${result.riskLevel}`}>
+        <strong>{riskText[result.riskLevel]}</strong>
+        <span>提交安全评分：{result.score} / 100</span>
+      </div>
+
+      <div className="parsed-requirements">
+        <h4>解析出的提交要求</h4>
+        <div>
+          <span>文件格式</span>
+          <strong>{result.parsedRequirements.formats.join('、') || '未明确'}</strong>
+        </div>
+        <div>
+          <span>命名规则</span>
+          <strong>{result.parsedRequirements.namingRule || '未明确'}</strong>
+        </div>
+        <div>
+          <span>必需材料</span>
+          <strong>{result.parsedRequirements.requiredMaterials.join('、') || '未明确'}</strong>
+        </div>
+        <div>
+          <span>字数/页数</span>
+          <strong>{result.parsedRequirements.lengthRequirement || '未明确'}</strong>
+        </div>
+        <div>
+          <span>截止时间</span>
+          <strong>{result.parsedRequirements.deadline || '未明确'}</strong>
+        </div>
+      </div>
+
+      <DocCheckGroup title="材料完整性检查结果" items={checksByCategory.completeness} />
+      <DocCheckGroup title="文件格式与命名检查结果" items={checksByCategory.format} />
+      <DocCheckGroup title="隐私风险检查结果" items={checksByCategory.privacy} />
+
+      <div className="uploaded-files">
+        <h4>已上传材料</h4>
+        {result.files.map((file) => (
+          <div key={file.fileName}>
+            <strong>{file.fileName}</strong>
+            <span>
+              .{file.extension || '无后缀'} / {file.status} / {file.wordCount} 字
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="suggestion-box">
+        <strong>修改建议列表</strong>
+        {result.suggestions.map((suggestion) => (
+          <p key={suggestion}>{suggestion}</p>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DocCheckGroup({ title, items }: { title: string; items: DocCheckResponse['checks'] }) {
+  return (
+    <div className="doc-check-group">
+      <h4>{title}</h4>
+      {items.length > 0 ? <FindingList findings={items} /> : <p className="muted">暂无检查项。</p>}
+    </div>
+  );
+}
+
 export default function App() {
   const [page, setPage] = useState<Page>('home');
   const [detectResult, setDetectResult] = useState<DetectResult | null>(null);
@@ -161,6 +260,8 @@ export default function App() {
   const [loadingLink, setLoadingLink] = useState(false);
 
   const [docName, setDocName] = useState('张三_计算机学院_创新创业报名表.docx');
+  const [docRequirement, setDocRequirement] = useState(sampleDocRequirement);
+  const [docFiles, setDocFiles] = useState<File[]>([]);
   const [docResult, setDocResult] = useState<DocCheckResponse | null>(null);
   const [loadingDoc, setLoadingDoc] = useState(false);
 
@@ -240,7 +341,7 @@ export default function App() {
     setLoadingDoc(true);
     setError('');
     try {
-      setDocResult(await checkDoc(docName));
+      setDocResult(await checkDoc(docRequirement, docFiles));
     } catch (err) {
       setError(err instanceof Error ? err.message : '材料检查失败，请稍后重试。');
     } finally {
@@ -466,6 +567,65 @@ export default function App() {
           <PageHero
             eyebrow="Doc Shield"
             title="提交护盾"
+            copy="输入提交要求并上传材料，系统会检查材料是否齐全、格式命名是否规范，并识别文件文本中的隐私安全风险。"
+            onBack={() => setPage('home')}
+          />
+          <div className="tool-grid doc-tool-grid">
+            <section className="card form-card doc-form-card">
+              <div className="section-title">
+                <span>01</span>
+                <div>
+                  <h3>提交要求与材料上传</h3>
+                  <p>支持 txt、md、pdf、docx 内容解析；png、jpg、zip 会先做文件名、后缀和上传状态检查。</p>
+                </div>
+              </div>
+              <textarea
+                value={docRequirement}
+                onChange={(event) => setDocRequirement(event.target.value)}
+                placeholder="粘贴课程论文、比赛材料、报名附件等提交要求"
+              />
+              <label className="upload-box doc-upload-box">
+                <input
+                  multiple
+                  type="file"
+                  accept=".txt,.md,.pdf,.docx,.png,.jpg,.jpeg,.zip"
+                  onChange={(event) => setDocFiles(Array.from(event.target.files ?? []))}
+                />
+                <span className="upload-icon">+</span>
+                <strong>{docFiles.length ? `已选择 ${docFiles.length} 个文件` : '选择或拖入多个材料文件'}</strong>
+                <span>PDF / DOCX / TXT / MD / PNG / JPG / ZIP</span>
+              </label>
+              {docFiles.length > 0 && (
+                <div className="file-chip-list">
+                  {docFiles.map((file) => (
+                    <span key={`${file.name}-${file.size}`}>{file.name}</span>
+                  ))}
+                </div>
+              )}
+              <div className="capability-list">
+                <span>要求解析</span>
+                <span>完整性检查</span>
+                <span>格式命名检查</span>
+                <span>隐私风险检查</span>
+              </div>
+              <button
+                className="primary-button"
+                disabled={loadingDoc || !docRequirement.trim() || docFiles.length === 0}
+                onClick={handleDocCheck}
+              >
+                {loadingDoc ? '检查中...' : '开始检查'}
+              </button>
+            </section>
+            <DocReportPanel result={docResult} />
+          </div>
+        </>
+      )}
+
+      {false && page === 'doc' && (
+        <>
+          <PageHero
+            eyebrow="Doc Shield"
+            title="提交护盾"
             copy="作业、报名材料、报告提交前的隐私与格式检查。当前为静态 / mock 能力展示。"
             onBack={() => setPage('home')}
           />
@@ -498,13 +658,13 @@ export default function App() {
               </div>
               {docResult ? (
                 <>
-                  <div className={`risk-banner ${docResult.riskLevel}`}>
-                    <strong>{riskText[docResult.riskLevel]}</strong>
+                  <div className={`risk-banner ${docResult!.riskLevel}`}>
+                    <strong>{riskText[docResult!.riskLevel]}</strong>
                     <span>已生成提交前检查建议</span>
                   </div>
-                  <FindingList findings={docResult.checks} />
+                  <FindingList findings={docResult!.checks} />
                   <div className="checklist">
-                    {docResult.checklist.map((item) => (
+                    {docResult!.checklist?.map((item) => (
                       <div className={item.status} key={item.item}>
                         <strong>{item.item}</strong>
                         <span>{item.status}</span>
@@ -513,7 +673,7 @@ export default function App() {
                   </div>
                   <div className="suggestion-box">
                     <strong>建议操作</strong>
-                    {docResult.suggestions.map((suggestion) => (
+                    {docResult!.suggestions.map((suggestion) => (
                       <p key={suggestion}>{suggestion}</p>
                     ))}
                   </div>

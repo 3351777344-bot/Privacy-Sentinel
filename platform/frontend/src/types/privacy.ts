@@ -63,8 +63,30 @@ export interface LinkCheckResponse {
 
 export interface DocCheckResponse {
   riskLevel: RiskLevel;
-  checks: TextFinding[];
-  checklist: Array<{
+  score: number;
+  summary: string;
+  parsedRequirements: {
+    formats: string[];
+    namingRule?: string | null;
+    requiredMaterials: string[];
+    lengthRequirement?: string | null;
+    deadline?: string | null;
+    rawText: string;
+  };
+  files: Array<{
+    fileName: string;
+    extension: string;
+    contentType: string;
+    size: number;
+    status: string;
+    wordCount: number;
+    pageCount?: number | null;
+  }>;
+  checks: Array<TextFinding & {
+    category: 'format' | 'completeness' | 'privacy';
+    status: 'pass' | 'warning' | 'fail';
+  }>;
+  checklist?: Array<{
     item: string;
     status: 'pass' | 'warning' | 'pending';
   }>;

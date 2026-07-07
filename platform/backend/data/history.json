@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "imageId": "img_cbde5d4e9666",
+    "originalImageUrl": "/static/uploads/img_cbde5d4e9666.png",
+    "processedImageUrl": "/static/processed/img_cbde5d4e9666_safe.png",
+    "riskLevel": "high",
+    "summary": "检测到手机号、地址、二维码等高风险隐私信息，建议打码后再分享。",
+    "createdAt": "2026-07-07 10:36:55",
+    "status": "已处理"
+  }
+]

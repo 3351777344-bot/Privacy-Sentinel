@@ -80,17 +80,38 @@ class LinkCheckResponse(BaseModel):
     suggestions: List[str]
 
 
-class DocCheckRequest(BaseModel):
-    fileName: Optional[str] = None
+class ParsedRequirements(BaseModel):
+    formats: List[str]
+    namingRule: Optional[str] = None
+    requiredMaterials: List[str]
+    lengthRequirement: Optional[str] = None
+    deadline: Optional[str] = None
+    rawText: str
 
 
-class ChecklistItem(BaseModel):
-    item: str
-    status: Literal["pass", "warning", "pending"]
+class DocFileSummary(BaseModel):
+    fileName: str
+    extension: str
+    contentType: str
+    size: int
+    status: str
+    wordCount: int
+    pageCount: Optional[int] = None
+
+
+class DocCheckItem(BaseModel):
+    category: Literal["format", "completeness", "privacy"]
+    label: str
+    evidence: str
+    riskLevel: RiskLevel
+    status: Literal["pass", "warning", "fail"]
 
 
 class DocCheckResponse(BaseModel):
     riskLevel: RiskLevel
-    checks: List[TextFinding]
-    checklist: List[ChecklistItem]
+    score: int
+    summary: str
+    parsedRequirements: ParsedRequirements
+    files: List[DocFileSummary]
+    checks: List[DocCheckItem]
     suggestions: List[str]

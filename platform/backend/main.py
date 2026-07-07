@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
@@ -15,10 +15,14 @@ from detector.mock_detector import detect_privacy_items
 from image_processor.blur import apply_blur_mask
 from image_processor.mask import apply_black_mask
 from image_processor.mosaic import apply_mosaic_mask
+from modules.doc_shield.completeness_checker import check_completeness
+from modules.doc_shield.file_extractor import extract_file
+from modules.doc_shield.format_checker import check_format
+from modules.doc_shield.privacy_checker import check_privacy
+from modules.doc_shield.report_generator import generate_report
+from modules.doc_shield.requirement_parser import parse_requirement
 from schemas.models import (
-    ChecklistItem,
     DetectResponse,
-    DocCheckRequest,
     DocCheckResponse,
     HistoryRecord,
     LinkCheckRequest,
@@ -41,7 +45,7 @@ for directory in [UPLOAD_DIR, PROCESSED_DIR, HISTORY_FILE.parent]:
 if not HISTORY_FILE.exists():
     HISTORY_FILE.write_text("[]", encoding="utf-8")
 
-app = FastAPI(title="GuardianHub API", version="0.2.0")
+app = FastAPI(title="GuardianHub API", version="0.3.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -173,7 +177,7 @@ def analyze_scam(request: ScamAnalyzeRequest) -> ScamAnalyzeResponse:
     rules = [
         ("索要验证码", r"验证码|短信码|校验码", 35, "high"),
         ("要求转账或垫付", r"转账|汇款|垫付|保证金|手续费|刷流水|解冻金", 35, "high"),
-        ("中奖或补贴诱导", r"中奖|补贴|奖学金|助学金|返现|退费", 25, "medium"),
+        ("中奖或补贴诱导", r"中奖|补贴|奖学金|助学金|返现|退款", 25, "medium"),
         ("制造紧迫感", r"截止|逾期|马上|立即|最后.*机会|今日.*失效", 20, "medium"),
         ("冒充身份", r"客服|老师|辅导员|学工|银行|公安|法院", 20, "medium"),
         ("可疑链接跳转", r"https?://|点击链接|扫码|二维码", 25, "medium"),
@@ -189,13 +193,7 @@ def analyze_scam(request: ScamAnalyzeRequest) -> ScamAnalyzeResponse:
             score += weight
             start = max(match.start() - 12, 0)
             end = min(match.end() + 12, len(text))
-            reasons.append(
-                TextFinding(
-                    label=label,
-                    evidence=text[start:end],
-                    riskLevel=level,
-                )
-            )
+            reasons.append(TextFinding(label=label, evidence=text[start:end], riskLevel=level))
 
     if not reasons:
         reasons.append(TextFinding(label="未命中高危话术", evidence="未发现典型诈骗关键词。", riskLevel="low"))
@@ -245,8 +243,7 @@ def check_link(request: LinkCheckRequest) -> LinkCheckResponse:
     is_punycode = "xn--" in domain
     if is_ip or has_many_hyphens or lacks_dot or is_punycode:
         score += 30
-        evidence = domain or "无法解析域名"
-        checks.append(TextFinding(label="域名异常", evidence=evidence, riskLevel="high"))
+        checks.append(TextFinding(label="域名异常", evidence=domain or "无法解析域名", riskLevel="high"))
 
     if not checks:
         checks.append(TextFinding(label="基础规则通过", evidence="未发现短链接、可疑关键词或异常域名。", riskLevel="low"))
@@ -258,55 +255,31 @@ def check_link(request: LinkCheckRequest) -> LinkCheckResponse:
         "low": ["当前基础规则未发现明显风险。", "仍建议确认页面来源和收件上下文。"],
     }[risk_level]
 
-    return LinkCheckResponse(
-        riskLevel=risk_level,
-        normalizedUrl=normalized_url,
-        checks=checks,
-        suggestions=suggestions,
-    )
+    return LinkCheckResponse(riskLevel=risk_level, normalizedUrl=normalized_url, checks=checks, suggestions=suggestions)
 
 
 @app.post("/api/doc/check", response_model=DocCheckResponse)
-def check_doc(request: DocCheckRequest) -> DocCheckResponse:
-    file_name = (request.fileName or "未命名材料.docx").strip()
-    checks: list[TextFinding] = []
-    checklist = [
-        ChecklistItem(item="文件命名检查", status="pass"),
-        ChecklistItem(item="隐私检查", status="warning"),
-        ChecklistItem(item="材料清单检查", status="pending"),
+async def check_doc(
+    requirement_text: str = Form(...),
+    files: list[UploadFile] = File(...),
+) -> DocCheckResponse:
+    requirement_text = requirement_text.strip()
+    if not requirement_text:
+        raise HTTPException(status_code=400, detail="请输入提交要求。")
+    if not files:
+        raise HTTPException(status_code=400, detail="请至少上传一个材料文件。")
+
+    parsed_requirements = parse_requirement(requirement_text)
+    extracted_files = []
+    for file in files:
+        content = await file.read()
+        file_name = (file.filename or "未命名材料").strip()
+        extracted_files.append(extract_file(file_name, file.content_type, content))
+
+    checks = [
+        *check_format(extracted_files, parsed_requirements),
+        *check_completeness(extracted_files, parsed_requirements),
+        *check_privacy(extracted_files),
     ]
-
-    if not re.search(r"[\u4e00-\u9fa5A-Za-z0-9]+[_-].+\.(docx|pdf|pptx|xlsx)$", file_name, flags=re.IGNORECASE):
-        checks.append(
-            TextFinding(
-                label="文件命名不规范",
-                evidence=file_name,
-                riskLevel="medium",
-            )
-        )
-        checklist[0].status = "warning"
-    else:
-        checks.append(TextFinding(label="文件命名格式可用", evidence=file_name, riskLevel="low"))
-
-    checks.append(
-        TextFinding(
-            label="隐私字段待复核",
-            evidence="检测到姓名、学院等字段，提交前建议确认是否符合材料要求。",
-            riskLevel="medium",
-        )
-    )
-    checks.append(
-        TextFinding(
-            label="材料清单待确认",
-            evidence="Mock：报名表已准备，身份证明、证明附件需人工确认。",
-            riskLevel="low",
-        )
-    )
-
-    risk_level = "medium" if any(item.riskLevel == "medium" for item in checks) else "low"
-    suggestions = [
-        "提交前确认文件名包含姓名、学院、材料类型等关键信息。",
-        "删除无关手机号、身份证号、家庭住址等隐私字段。",
-        "按通知要求核对附件清单，避免漏交或错交。",
-    ]
-    return DocCheckResponse(riskLevel=risk_level, checks=checks, checklist=checklist, suggestions=suggestions)
+    report = generate_report(parsed_requirements, extracted_files, checks)
+    return DocCheckResponse(**report)

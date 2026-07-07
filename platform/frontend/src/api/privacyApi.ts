@@ -66,11 +66,14 @@ export async function checkLink(url: string): Promise<LinkCheckResponse> {
   return parseResponse<LinkCheckResponse>(response);
 }
 
-export async function checkDoc(fileName?: string): Promise<DocCheckResponse> {
+export async function checkDoc(requirementText: string, files: File[]): Promise<DocCheckResponse> {
+  const formData = new FormData();
+  formData.append('requirement_text', requirementText);
+  files.forEach((file) => formData.append('files', file));
+
   const response = await fetch(`${API_BASE_URL}/api/doc/check`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fileName })
+    body: formData
   });
   return parseResponse<DocCheckResponse>(response);
 }
