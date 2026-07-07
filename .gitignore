@@ -2,10 +2,14 @@
 .idea/
 build/
 **/build/
+dist/
+**/dist/
 node_modules/
 oh_modules/
+__pycache__/
+**/__pycache__/
+*.py[cod]
 local.properties
 *.hap
 *.hsp
 *.har
-

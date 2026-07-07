@@ -1,63 +1,61 @@
-# Privacy Sentinel
+# GuardianHub：面向高校场景的 AI 数字安全防护平台
 
-隐私哨兵：基于 HarmonyOS 的 AI 安全分享助手
-
-本项目是用于鸿蒙高校创新赛的 HarmonyOS ArkTS 前端静态原型。当前版本只包含页面、导航与 mock 数据，不接入后端，便于后续对接 FastAPI 检测服务。
-
-## 页面
-
-- 首页 `Index`
-- 图片选择页 `ImageSelect`
-- 检测结果页 `DetectResult`
-- 打码编辑页 `EditMask`
-- 安全预览页 `SafePreview`
-- 历史记录页 `History`
-
-## 目录结构
+当前主要运行和维护的 PC Web Demo 项目位于：
 
 ```text
-PrivacySentinel/
-├── AppScope/
-│   └── app.json5
-├── entry/
-│   ├── build-profile.json5
-│   ├── hvigorfile.ts
-│   ├── oh-package.json5
-│   └── src/main/
-│       ├── ets/
-│       │   ├── components/
-│       │   │   ├── AppHeader.ets
-│       │   │   ├── MockPhoto.ets
-│       │   │   └── RiskBadge.ets
-│       │   ├── data/
-│       │   │   └── MockData.ets
-│       │   ├── entryability/
-│       │   │   └── EntryAbility.ets
-│       │   ├── models/
-│       │   │   └── PrivacyModels.ets
-│       │   └── pages/
-│       │       ├── DetectResult.ets
-│       │       ├── EditMask.ets
-│       │       ├── History.ets
-│       │       ├── ImageSelect.ets
-│       │       ├── Index.ets
-│       │       └── SafePreview.ets
-│       ├── module.json5
-│       └── resources/
-│           └── base/
-│               ├── element/
-│               │   ├── color.json
-│               │   └── string.json
-│               └── profile/
-│                   └── main_pages.json
-├── build-profile.json5
-├── hvigorfile.ts
-└── oh-package.json5
+platform/
 ```
 
-## 后续接入建议
+该目录内包含 GuardianHub 平台的后端、前端、文档和项目级 README。Privacy Sentinel 保留为平台中的“隐私哨兵”模块名称：
 
-- 在 `entry/src/main/ets/models/PrivacyModels.ets` 扩展接口字段，保持前后端数据结构一致。
-- 将 `entry/src/main/ets/data/MockData.ets` 替换为 `services/DetectService.ets`，通过 HTTP 调用 FastAPI。
-- 页面层只消费 `DetectResult`、`PrivacyItem`、`HistoryRecord`，减少后续改动面。
+```text
+platform/
+├── backend/
+├── frontend/
+├── docs/
+└── README.md
+```
 
+外层目录仅作为仓库总目录使用。旧 HarmonyOS 工程和 Codex 运行临时文件已归档到 `_archive/`，不会影响当前 PC Web Demo 的启动和维护。
+
+## 当前主项目
+
+- 后端：`platform/backend`
+- 前端：`platform/frontend`
+- 文档：`platform/docs`
+- 项目说明：`platform/README.md`
+
+## 平台模块
+
+- Privacy Sentinel 隐私哨兵：图片分享前隐私检测与一键打码。
+- Scam Radar 反诈雷达：聊天文本 / 聊天截图 OCR 文本中的诈骗风险识别。
+- Link Guard 链接卫士：URL 和二维码解析链接的风险检测。
+- Doc Shield 提交护盾：作业、报名材料、报告提交前的隐私与格式检查。
+
+## 归档目录
+
+- `_archive/harmonyos-old/`：旧 HarmonyOS / ArkTS 工程文件。
+- `_archive/codex-work/`：Codex 工作目录和本地运行日志。
+
+## 启动命令
+
+后端：
+
+```bash
+cd platform/backend
+python -m pip install -r requirements.txt
+python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+```
+
+前端：
+
+```bash
+cd platform/frontend
+npm install
+npm run dev
+```
+
+默认访问地址：
+
+- 前端：`http://127.0.0.1:5173`
+- 后端：`http://127.0.0.1:8000`
