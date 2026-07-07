@@ -13,3 +13,4 @@ local.properties
 *.hap
 *.hsp
 *.har
+_archive/codex-work/work/*.log

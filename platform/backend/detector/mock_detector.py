@@ -36,7 +36,7 @@ def detect_privacy_items(image_path: str, image_id: str, original_url: str) -> D
             id=f"{image_id}_address",
             type="address",
             label="收货地址",
-            text="北京市海淀区**科技园 8 号楼",
+            text="北京市海淀区某科技园 8 号楼",
             riskLevel="high",
             box=_box(width, height, 0.14, 0.39, 0.62, 0.08),
             suggestion="详细地址可能暴露个人住址或活动范围，建议完整打码。",

@@ -1,4 +1,6 @@
+import { useMemo, useState } from 'react';
 import type { MaskType, PrivacyItem } from '../types/privacy';
+import { RiskBadge } from './RiskComponents';
 
 interface MaskControlProps {
   disabled: boolean;
@@ -6,7 +8,7 @@ interface MaskControlProps {
   maskType: MaskType;
   items: PrivacyItem[];
   onMaskTypeChange: (type: MaskType) => void;
-  onProcess: (scope: 'high' | 'all') => Promise<void>;
+  onProcess: (scope: 'high' | 'all' | 'custom', selectedIds?: string[]) => Promise<void>;
 }
 
 const maskOptions: Array<{ type: MaskType; label: string; desc: string }> = [
@@ -23,15 +25,30 @@ export default function MaskControl({
   onMaskTypeChange,
   onProcess
 }: MaskControlProps) {
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const highCount = items.filter((item) => item.riskLevel === 'high').length;
+  const selectedCount = selectedIds.length;
+
+  const selectableItems = useMemo(
+    () =>
+      items.map((item) => ({
+        ...item,
+        checked: selectedIds.includes(item.id)
+      })),
+    [items, selectedIds]
+  );
+
+  function toggleItem(id: string) {
+    setSelectedIds((current) => (current.includes(id) ? current.filter((itemId) => itemId !== id) : [...current, id]));
+  }
 
   return (
     <section className="card">
       <div className="section-title">
         <span>05</span>
         <div>
-          <h3>打码控制</h3>
-          <p>选择处理方式，一键生成可以再次确认的安全预览图。</p>
+          <h3>处理策略</h3>
+          <p>选择打码方式和处理范围，生成可复核的安全分享版本。</p>
         </div>
       </div>
       <div className="mask-options">
@@ -46,14 +63,36 @@ export default function MaskControl({
           </button>
         ))}
       </div>
-      <div className="action-row">
+
+      <div className="strategy-grid">
         <button disabled={disabled || loading || highCount === 0} onClick={() => onProcess('high')}>
-          {loading ? '处理中...' : `一键处理高风险 (${highCount})`}
+          <strong>只处理高风险</strong>
+          <span>{highCount} 项</span>
         </button>
         <button disabled={disabled || loading || items.length === 0} onClick={() => onProcess('all')}>
-          处理全部检测项
+          <strong>处理全部</strong>
+          <span>{items.length} 项</span>
+        </button>
+        <button disabled={disabled || loading || selectedCount === 0} onClick={() => onProcess('custom', selectedIds)}>
+          <strong>自定义选择</strong>
+          <span>{selectedCount} 项</span>
         </button>
       </div>
+
+      {items.length > 0 && (
+        <div className="custom-mask-list">
+          {selectableItems.map((item) => (
+            <label className="custom-mask-item" key={item.id}>
+              <input checked={item.checked} type="checkbox" onChange={() => toggleItem(item.id)} />
+              <span>
+                <strong>{item.label}</strong>
+                <small>{item.text}</small>
+              </span>
+              <RiskBadge level={item.riskLevel} compact />
+            </label>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

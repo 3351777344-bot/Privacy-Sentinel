@@ -4,7 +4,7 @@ import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -45,7 +45,7 @@ for directory in [UPLOAD_DIR, PROCESSED_DIR, HISTORY_FILE.parent]:
 if not HISTORY_FILE.exists():
     HISTORY_FILE.write_text("[]", encoding="utf-8")
 
-app = FastAPI(title="GuardianHub API", version="0.3.0")
+app = FastAPI(title="GuardianHub API", version="0.4.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -175,14 +175,15 @@ def analyze_scam(request: ScamAnalyzeRequest) -> ScamAnalyzeResponse:
         raise HTTPException(status_code=400, detail="请输入需要分析的聊天文本。")
 
     rules = [
-        ("索要验证码", r"验证码|短信码|校验码", 35, "high"),
-        ("要求转账或垫付", r"转账|汇款|垫付|保证金|手续费|刷流水|解冻金", 35, "high"),
-        ("中奖或补贴诱导", r"中奖|补贴|奖学金|助学金|返现|退款", 25, "medium"),
-        ("制造紧迫感", r"截止|逾期|马上|立即|最后.*机会|今日.*失效", 20, "medium"),
-        ("冒充身份", r"客服|老师|辅导员|学工|银行|公安|法院", 20, "medium"),
-        ("可疑链接跳转", r"https?://|点击链接|扫码|二维码", 25, "medium"),
-        ("刷单兼职", r"刷单|兼职|日结|佣金|拉群", 35, "high"),
-        ("索要敏感资料", r"银行卡|身份证|密码|人脸|账号", 30, "high"),
+        ("索要验证码", r"验证码|短信码|校验码|动态码", 35, "high"),
+        ("诱导转账", r"转账|汇款|垫付|保证金|手续费|刷流水|解冻金|押金", 35, "high"),
+        ("高额回报", r"高额回报|稳赚|保本|返利|日结|佣金|躺赚|中奖|补贴|奖学金|返现|退款", 30, "high"),
+        ("催促决策", r"截止|逾期|马上|立即|最后\s*机会|今日.*失效|限时|名额有限", 20, "medium"),
+        ("脱离平台", r"加微信|加QQ|私聊|扫码进群|下载.*app|不要在平台|绕过平台|线下交易", 30, "high"),
+        ("隐瞒他人", r"不要告诉|别告诉|保密|悄悄|不要和.*说|只告诉你", 25, "medium"),
+        ("冒充身份", r"客服|老师|辅导员|学工|银行|公安|法院|平台审核", 20, "medium"),
+        ("可疑链接", r"https?://|点击链接|扫码|二维码|短链接|bit\.ly|tinyurl", 25, "medium"),
+        ("索要敏感资料", r"银行卡|身份证|密码|人脸|账号|支付密码|银行卡号", 30, "high"),
     ]
 
     reasons: list[TextFinding] = []
@@ -196,16 +197,26 @@ def analyze_scam(request: ScamAnalyzeRequest) -> ScamAnalyzeResponse:
             reasons.append(TextFinding(label=label, evidence=text[start:end], riskLevel=level))
 
     if not reasons:
-        reasons.append(TextFinding(label="未命中高危话术", evidence="未发现典型诈骗关键词。", riskLevel="low"))
+        reasons.append(TextFinding(label="未命中典型诈骗话术", evidence="未发现典型高危关键词。", riskLevel="low"))
 
     risk_level = _level_from_score(score)
     suggestions = {
         "high": ["停止转账、提交验证码或填写银行卡。", "通过学校官网、辅导员或官方客服电话二次确认。", "保留聊天记录并向反诈或校园安全渠道反馈。"],
-        "medium": ["不要直接点击对方发送的链接。", "核对通知来源，优先使用学校官方系统。", "涉及个人信息时先询问可信联系人。"],
+        "medium": ["不要直接点击对方发送的链接。", "核对通知来源，优先使用学校或平台官方入口。", "涉及个人信息时先询问可信联系人。"],
         "low": ["当前未发现明显诈骗特征。", "仍建议不要在聊天中发送验证码、密码、身份证或银行卡信息。"],
     }[risk_level]
 
     return ScamAnalyzeResponse(riskLevel=risk_level, score=min(score, 100), reasons=reasons, suggestions=suggestions)
+
+
+def _has_random_segment(path: str) -> bool:
+    segments = [segment for segment in path.split("/") if len(segment) >= 14]
+    return any(
+        bool(re.fullmatch(r"[A-Za-z0-9_-]+", segment))
+        and sum(char.isdigit() for char in segment) >= 4
+        and sum(char.isalpha() for char in segment) >= 4
+        for segment in segments
+    )
 
 
 @app.post("/api/link/check", response_model=LinkCheckResponse)
@@ -231,7 +242,22 @@ def check_link(request: LinkCheckRequest) -> LinkCheckResponse:
         score += 35
         checks.append(TextFinding(label="短链接风险", evidence=domain, riskLevel="high"))
 
-    suspicious_keywords = ["login", "verify", "gift", "bonus", "free", "pay", "bank", "password", "scholarship", "奖学金", "补贴"]
+    suspicious_keywords = [
+        "login",
+        "verify",
+        "gift",
+        "bonus",
+        "free",
+        "pay",
+        "bank",
+        "password",
+        "scholarship",
+        "refund",
+        "奖学金",
+        "补贴",
+        "登录",
+        "验证",
+    ]
     hit_keywords = [keyword for keyword in suspicious_keywords if keyword.lower() in normalized_url.lower()]
     if hit_keywords:
         score += 25
@@ -243,10 +269,22 @@ def check_link(request: LinkCheckRequest) -> LinkCheckResponse:
     is_punycode = "xn--" in domain
     if is_ip or has_many_hyphens or lacks_dot or is_punycode:
         score += 30
-        checks.append(TextFinding(label="域名异常", evidence=domain or "无法解析域名", riskLevel="high"))
+        checks.append(TextFinding(label="异常域名", evidence=domain or "无法解析域名", riskLevel="high"))
 
-    if not checks:
-        checks.append(TextFinding(label="基础规则通过", evidence="未发现短链接、可疑关键词或异常域名。", riskLevel="low"))
+    if len(normalized_url) > 140:
+        score += 15
+        checks.append(TextFinding(label="URL 过长", evidence=f"长度 {len(normalized_url)}，可能隐藏跳转或追踪参数。", riskLevel="medium"))
+
+    if _has_random_segment(parsed.path):
+        score += 20
+        checks.append(TextFinding(label="随机字符路径", evidence=parsed.path[:120], riskLevel="medium"))
+
+    query = parse_qs(parsed.query)
+    suspicious_params = {"token", "code", "auth", "redirect", "url", "bank", "password", "verify", "callback"}
+    hit_params = [key for key in query if key.lower() in suspicious_params]
+    if hit_params:
+        score += 20
+        checks.append(TextFinding(label="可疑参数", evidence="、".join(hit_params), riskLevel="medium"))
 
     risk_level = _level_from_score(score)
     suggestions = {

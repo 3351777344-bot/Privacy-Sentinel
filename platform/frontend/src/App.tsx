@@ -8,12 +8,19 @@ import {
   maskImage,
   toAssetUrl
 } from './api/privacyApi';
-import HistoryList from './components/HistoryList';
 import ImagePreview from './components/ImagePreview';
 import MaskControl from './components/MaskControl';
 import PrivacyItemList from './components/PrivacyItemList';
-import { riskText } from './components/RiskSummary';
 import RiskSummary from './components/RiskSummary';
+import {
+  EvidenceList,
+  HistoryTimeline,
+  RiskBadge,
+  RiskReport,
+  ScoreCard,
+  SuggestionList,
+  riskText
+} from './components/RiskComponents';
 import UploadPanel from './components/UploadPanel';
 import type {
   DetectResult,
@@ -27,217 +34,99 @@ import type {
 } from './types/privacy';
 
 type Page = 'home' | 'privacy' | 'scam' | 'link' | 'doc';
+type ToolPage = Exclude<Page, 'home'>;
 
 const modules: Array<{
-  id: Page;
+  id: ToolPage;
   title: string;
   subtitle: string;
   detail: string;
   accent: string;
-  status: string;
 }> = [
   {
     id: 'privacy',
-    title: 'Privacy Sentinel 隐私哨兵',
-    subtitle: '图片分享前隐私检测与一键打码',
-    detail: '识别手机号、地址、二维码、头像、昵称等敏感区域，并生成安全分享版本。',
-    accent: 'blue',
-    status: '已接入'
+    title: '隐私哨兵',
+    subtitle: '图片分享前隐私检测与打码',
+    detail: '识别手机号、地址、二维码、头像、昵称等敏感区域，生成安全分享版本。',
+    accent: 'blue'
   },
   {
     id: 'scam',
-    title: 'Scam Radar 反诈雷达',
-    subtitle: '聊天文本 / 截图诈骗风险识别',
-    detail: '用规则识别转账、中奖、验证码、冒充客服、刷单兼职等典型诈骗话术。',
-    accent: 'red',
-    status: '规则版'
+    title: '反诈雷达',
+    subtitle: '聊天文本诈骗风险识别',
+    detail: '识别诱导转账、高额回报、催促决策、脱离平台、隐瞒他人和可疑链接。',
+    accent: 'red'
   },
   {
     id: 'link',
-    title: 'Link Guard 链接卫士',
-    subtitle: 'URL 和二维码风险检测',
-    detail: '检查 HTTPS、短链接、可疑关键词、异常域名和访问建议。',
-    accent: 'teal',
-    status: '规则版'
+    title: '链接卫士',
+    subtitle: 'URL 体检与访问建议',
+    detail: '检查 HTTPS、短链接、可疑关键词、异常域名、过长 URL、随机字符和可疑参数。',
+    accent: 'teal'
   },
   {
     id: 'doc',
-    title: 'Doc Shield 提交护盾',
-    subtitle: '作业、报名材料、报告提交前检查',
-    detail: '展示文件命名、隐私内容、材料清单三类提交前自检能力。',
-    accent: 'amber',
-    status: '已接入'
+    title: '提交护盾',
+    subtitle: '材料提交前安全检查',
+    detail: '按提交要求、上传材料、生成报告的流程检查完整性、格式、隐私风险和评分。',
+    accent: 'amber'
   }
 ];
 
-const sampleScamText = '老师通知：奖学金补贴今日截止，请点击链接填写银行卡和验证码，逾期视为放弃。';
+const sampleScamText =
+  '老师通知：奖学金补贴今日截止，请点击链接填写银行卡和验证码，逾期视为放弃。不要告诉其他同学，名额有限。';
 
 const sampleDocRequirement =
-  '课程论文提交要求：请于 2026年7月20日 18:00 前提交 PDF 文件，命名规则为 学号-姓名-课程论文。材料需包含封面、摘要、正文、参考文献；正文不少于3000字。';
+  '课程论文提交要求：请于 2026年7月10日 18:00 前提交 PDF 文件，命名规则为 学号-姓名-课程论文。材料需包含封面、摘要、正文、参考文献；正文不少于 3000 字。';
 
-function riskScore(records: HistoryRecord[]) {
-  const penalty = records.slice(0, 5).reduce((total, record) => {
+function scoreFromRisk(level: RiskLevel) {
+  if (level === 'high') return 48;
+  if (level === 'medium') return 74;
+  return 92;
+}
+
+function privacyScore(result?: DetectResult | null) {
+  if (!result) return undefined;
+  const penalty = result.items.reduce((total, item) => {
+    if (item.riskLevel === 'high') return total + 18;
+    if (item.riskLevel === 'medium') return total + 9;
+    return total + 2;
+  }, 0);
+  return Math.max(0, 100 - penalty);
+}
+
+function overallScore(records: HistoryRecord[], latestScores: Array<number | undefined>) {
+  const recordPenalty = records.slice(0, 6).reduce((total, record) => {
     if (record.riskLevel === 'high') return total + 9;
     if (record.riskLevel === 'medium') return total + 5;
     return total + 1;
   }, 0);
-  return Math.max(62, 96 - penalty);
+  const activeScores = latestScores.filter((score): score is number => typeof score === 'number');
+  const sessionAverage = activeScores.length
+    ? Math.round(activeScores.reduce((total, score) => total + score, 0) / activeScores.length)
+    : 96;
+  return Math.max(45, Math.min(100, Math.round((sessionAverage + (96 - recordPenalty)) / 2)));
 }
 
-function riskClass(level?: RiskLevel) {
-  return level ? `risk-pill ${level}` : 'risk-pill low';
-}
-
-function FindingList({ findings }: { findings: TextFinding[] }) {
-  if (findings.length === 0) {
-    return <p className="muted">暂无风险命中项。</p>;
-  }
-
-  return (
-    <div className="finding-list">
-      {findings.map((item, index) => (
-        <article className={`finding-item ${item.riskLevel}`} key={`${item.label}-${index}`}>
-          <div>
-            <strong>{item.label}</strong>
-            <span>{item.evidence}</span>
-          </div>
-          <em className={riskClass(item.riskLevel)}>{riskText[item.riskLevel]}</em>
-        </article>
-      ))}
-    </div>
-  );
-}
-
-function ResultPanel({
-  title,
-  result
-}: {
-  title: string;
-  result?: ScamAnalyzeResponse | LinkCheckResponse | DocCheckResponse | null;
-}) {
-  return (
-    <section className="card result-card">
-      <div className="section-title">
-        <span>R</span>
-        <div>
-          <h3>{title}</h3>
-          <p>所有模块统一使用 high / medium / low 风险等级。</p>
-        </div>
-      </div>
-      {result ? (
-        <>
-          <div className={`risk-banner ${result.riskLevel}`}>
-            <strong>{riskText[result.riskLevel]}</strong>
-            <span>{'score' in result ? `规则评分：${result.score}` : '已完成规则检查'}</span>
-          </div>
-          <FindingList findings={'checks' in result ? result.checks : result.reasons} />
-          <div className="suggestion-box">
-            <strong>建议操作</strong>
-            {result.suggestions.map((suggestion) => (
-              <p key={suggestion}>{suggestion}</p>
-            ))}
-          </div>
-        </>
-      ) : (
-        <p className="muted">提交内容后，这里会显示风险等级、风险原因和建议操作。</p>
-      )}
-    </section>
-  );
-}
-
-function DocReportPanel({ result }: { result: DocCheckResponse | null }) {
-  const checksByCategory = {
-    completeness: result?.checks.filter((item) => item.category === 'completeness') ?? [],
-    format: result?.checks.filter((item) => item.category === 'format') ?? [],
-    privacy: result?.checks.filter((item) => item.category === 'privacy') ?? []
+function makeHistoryRecord(moduleName: string, riskLevel: RiskLevel, summary: string, status = '已生成报告'): HistoryRecord {
+  return {
+    imageId: moduleName,
+    originalImageUrl: '',
+    processedImageUrl: null,
+    riskLevel,
+    summary,
+    createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+    status
   };
-
-  if (!result) {
-    return (
-      <section className="card result-card doc-report">
-        <div className="section-title">
-          <span>R</span>
-          <div>
-            <h3>提交前检查报告</h3>
-            <p>上传材料并开始检查后，这里会展示解析要求、完整性、格式命名、隐私风险和修改建议。</p>
-          </div>
-        </div>
-        <p className="muted">等待生成报告。</p>
-      </section>
-    );
-  }
-
-  return (
-    <section className="card result-card doc-report">
-      <div className="section-title">
-        <span>R</span>
-        <div>
-          <h3>提交前检查报告</h3>
-          <p>{result.summary}</p>
-        </div>
-      </div>
-
-      <div className={`risk-banner ${result.riskLevel}`}>
-        <strong>{riskText[result.riskLevel]}</strong>
-        <span>提交安全评分：{result.score} / 100</span>
-      </div>
-
-      <div className="parsed-requirements">
-        <h4>解析出的提交要求</h4>
-        <div>
-          <span>文件格式</span>
-          <strong>{result.parsedRequirements.formats.join('、') || '未明确'}</strong>
-        </div>
-        <div>
-          <span>命名规则</span>
-          <strong>{result.parsedRequirements.namingRule || '未明确'}</strong>
-        </div>
-        <div>
-          <span>必需材料</span>
-          <strong>{result.parsedRequirements.requiredMaterials.join('、') || '未明确'}</strong>
-        </div>
-        <div>
-          <span>字数/页数</span>
-          <strong>{result.parsedRequirements.lengthRequirement || '未明确'}</strong>
-        </div>
-        <div>
-          <span>截止时间</span>
-          <strong>{result.parsedRequirements.deadline || '未明确'}</strong>
-        </div>
-      </div>
-
-      <DocCheckGroup title="材料完整性检查结果" items={checksByCategory.completeness} />
-      <DocCheckGroup title="文件格式与命名检查结果" items={checksByCategory.format} />
-      <DocCheckGroup title="隐私风险检查结果" items={checksByCategory.privacy} />
-
-      <div className="uploaded-files">
-        <h4>已上传材料</h4>
-        {result.files.map((file) => (
-          <div key={file.fileName}>
-            <strong>{file.fileName}</strong>
-            <span>
-              .{file.extension || '无后缀'} / {file.status} / {file.wordCount} 字
-            </span>
-          </div>
-        ))}
-      </div>
-
-      <div className="suggestion-box">
-        <strong>修改建议列表</strong>
-        {result.suggestions.map((suggestion) => (
-          <p key={suggestion}>{suggestion}</p>
-        ))}
-      </div>
-    </section>
-  );
 }
 
-function DocCheckGroup({ title, items }: { title: string; items: DocCheckResponse['checks'] }) {
+function evidenceFromPrivacy(result?: DetectResult | null): TextFinding[] {
   return (
-    <div className="doc-check-group">
-      <h4>{title}</h4>
-      {items.length > 0 ? <FindingList findings={items} /> : <p className="muted">暂无检查项。</p>}
-    </div>
+    result?.items.map((item) => ({
+      label: item.label,
+      evidence: `${item.text}：${item.suggestion}`,
+      riskLevel: item.riskLevel
+    })) ?? []
   );
 }
 
@@ -246,6 +135,7 @@ export default function App() {
   const [detectResult, setDetectResult] = useState<DetectResult | null>(null);
   const [processedUrl, setProcessedUrl] = useState('');
   const [history, setHistory] = useState<HistoryRecord[]>([]);
+  const [sessionHistory, setSessionHistory] = useState<HistoryRecord[]>([]);
   const [maskType, setMaskType] = useState<MaskType>('black');
   const [loadingDetect, setLoadingDetect] = useState(false);
   const [loadingMask, setLoadingMask] = useState(false);
@@ -255,11 +145,10 @@ export default function App() {
   const [scamResult, setScamResult] = useState<ScamAnalyzeResponse | null>(null);
   const [loadingScam, setLoadingScam] = useState(false);
 
-  const [url, setUrl] = useState('http://bit.ly/scholarship-verify');
+  const [url, setUrl] = useState('http://bit.ly/scholarship-verify?bank=1&code=login');
   const [linkResult, setLinkResult] = useState<LinkCheckResponse | null>(null);
   const [loadingLink, setLoadingLink] = useState(false);
 
-  const [docName, setDocName] = useState('张三_计算机学院_创新创业报名表.docx');
   const [docRequirement, setDocRequirement] = useState(sampleDocRequirement);
   const [docFiles, setDocFiles] = useState<File[]>([]);
   const [docResult, setDocResult] = useState<DocCheckResponse | null>(null);
@@ -277,7 +166,42 @@ export default function App() {
     refreshHistory();
   }, []);
 
-  const score = useMemo(() => riskScore(history), [history]);
+  const mergedHistory = useMemo(() => [...sessionHistory, ...history], [sessionHistory, history]);
+  const score = useMemo(
+    () =>
+      overallScore(mergedHistory, [
+        privacyScore(detectResult),
+        scamResult?.score,
+        linkResult ? scoreFromRisk(linkResult.riskLevel) : undefined,
+        docResult?.score
+      ]),
+    [detectResult, docResult, linkResult, mergedHistory, scamResult]
+  );
+
+  const moduleStatus = useMemo(() => {
+    return {
+      privacy: {
+        riskLevel: detectResult?.riskLevel ?? history[0]?.riskLevel ?? ('low' as RiskLevel),
+        score: privacyScore(detectResult) ?? (history[0] ? scoreFromRisk(history[0].riskLevel) : 92),
+        status: detectResult ? detectResult.summary : history[0]?.summary ?? '等待图片检测'
+      },
+      scam: {
+        riskLevel: scamResult?.riskLevel ?? ('low' as RiskLevel),
+        score: scamResult?.score ?? 92,
+        status: scamResult ? `识别到 ${scamResult.reasons.length} 条风险证据` : '等待文本分析'
+      },
+      link: {
+        riskLevel: linkResult?.riskLevel ?? ('low' as RiskLevel),
+        score: linkResult ? scoreFromRisk(linkResult.riskLevel) : 92,
+        status: linkResult ? `完成 ${linkResult.checks.length} 项链接体检` : '等待 URL 体检'
+      },
+      doc: {
+        riskLevel: docResult?.riskLevel ?? ('low' as RiskLevel),
+        score: docResult?.score ?? 92,
+        status: docResult?.summary ?? '等待材料检查'
+      }
+    };
+  }, [detectResult, docResult, history, linkResult, scamResult]);
 
   async function handleDetect(file: File) {
     setLoadingDetect(true);
@@ -294,12 +218,17 @@ export default function App() {
     }
   }
 
-  async function handleMask(scope: 'high' | 'all') {
+  async function handleMask(scope: 'high' | 'all' | 'custom', selectedIds: string[] = []) {
     if (!detectResult) return;
     setLoadingMask(true);
     setError('');
+
     const selectedItems = detectResult.items
-      .filter((item) => scope === 'all' || item.riskLevel === 'high')
+      .filter((item) => {
+        if (scope === 'all') return true;
+        if (scope === 'high') return item.riskLevel === 'high';
+        return selectedIds.includes(item.id);
+      })
       .map((item) => item.box);
 
     try {
@@ -317,7 +246,12 @@ export default function App() {
     setLoadingScam(true);
     setError('');
     try {
-      setScamResult(await analyzeScamText(scamText));
+      const result = await analyzeScamText(scamText);
+      setScamResult(result);
+      setSessionHistory((current) => [
+        makeHistoryRecord('反诈雷达', result.riskLevel, `诈骗风险分析：${riskText[result.riskLevel]}`),
+        ...current
+      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : '反诈分析失败，请稍后重试。');
     } finally {
@@ -329,7 +263,12 @@ export default function App() {
     setLoadingLink(true);
     setError('');
     try {
-      setLinkResult(await checkLink(url));
+      const result = await checkLink(url);
+      setLinkResult(result);
+      setSessionHistory((current) => [
+        makeHistoryRecord('链接卫士', result.riskLevel, `链接体检：${result.normalizedUrl}`),
+        ...current
+      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : '链接检测失败，请稍后重试。');
     } finally {
@@ -341,7 +280,12 @@ export default function App() {
     setLoadingDoc(true);
     setError('');
     try {
-      setDocResult(await checkDoc(docRequirement, docFiles));
+      const result = await checkDoc(docRequirement, docFiles);
+      setDocResult(result);
+      setSessionHistory((current) => [
+        makeHistoryRecord('提交护盾', result.riskLevel, result.summary),
+        ...current
+      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : '材料检查失败，请稍后重试。');
     } finally {
@@ -357,13 +301,12 @@ export default function App() {
           <strong>GuardianHub</strong>
         </button>
         <div className="nav-actions">
+          <button className={page === 'home' ? 'active' : ''} onClick={() => setPage('home')}>
+            安全中心
+          </button>
           {modules.map((module) => (
-            <button
-              className={page === module.id ? 'active' : ''}
-              key={module.id}
-              onClick={() => setPage(module.id)}
-            >
-              {module.title.split(' ')[0]}
+            <button className={page === module.id ? 'active' : ''} key={module.id} onClick={() => setPage(module.id)}>
+              {module.title}
             </button>
           ))}
         </div>
@@ -375,48 +318,54 @@ export default function App() {
         <>
           <header className="app-header">
             <div className="hero-copy">
-              <p className="eyebrow">GuardianHub / Campus AI Safety</p>
-              <h1>GuardianHub</h1>
-              <h2>面向高校场景的 AI 数字安全防护平台</h2>
+              <p className="eyebrow">GuardianHub / AI Digital Safety Platform</p>
+              <h1>安全中心</h1>
+              <h2>统一的 AI 数字安全防护平台</h2>
               <p className="header-copy">
-                将 Privacy Sentinel 隐私哨兵升级为 GuardianHub 安全中心，覆盖图片分享、聊天反诈、链接访问和材料提交四个高频数字生活入口。
+                GuardianHub 面向高校与个人数字生活场景，把图片分享、聊天反诈、链接访问、材料提交四类高频风险整合到同一个安全中心。
+                当前版本基于本地规则和可解释报告运行，不接入付费大模型 API，也不强依赖复杂 OCR。
               </p>
             </div>
-            <div className="score-card">
-              <span>今日安全评分</span>
-              <strong>{score}</strong>
-              <p>{score >= 85 ? '整体态势良好' : '建议复核近期高风险记录'}</p>
-            </div>
+            <ScoreCard score={score} title="今日安全评分" />
           </header>
 
           <section className="intro card">
             <div>
-              <h3>GuardianHub：面向高校场景的 AI 数字安全防护平台</h3>
+              <h3>从四个安全工具升级为统一安全平台</h3>
               <p>
-                GuardianHub 以“提交前、点击前、分享前、转账前”为防护节点，先用本地规则和 mock 数据保证演示稳定，
-                后续可平滑升级 OCR、二维码识别、诈骗语义识别和高校身份场景策略。
+                平台以“分享前、点击前、转账前、提交前”为防护节点，统一输出 high / medium / low 风险等级、0-100 安全评分、风险证据和建议操作。
               </p>
             </div>
             <div className="intro-tags">
-              <span>本地稳定运行</span>
-              <span>统一风险等级</span>
+              <span>统一风险报告</span>
+              <span>本地规则可解释</span>
+              <span>卡片式安全中心</span>
               <span>高校场景优先</span>
-              <span>规则可解释</span>
             </div>
           </section>
 
           <section className="module-grid">
-            {modules.map((module) => (
-              <article className={`module-card ${module.accent}`} key={module.id}>
-                <div>
-                  <span>{module.status}</span>
-                  <h3>{module.title}</h3>
-                  <p>{module.subtitle}</p>
-                </div>
-                <p>{module.detail}</p>
-                <button onClick={() => setPage(module.id)}>进入模块</button>
-              </article>
-            ))}
+            {modules.map((module) => {
+              const status = moduleStatus[module.id];
+              return (
+                <article className={`module-card ${module.accent}`} key={module.id}>
+                  <div className="module-card-top">
+                    <span>{status.status}</span>
+                    <RiskBadge level={status.riskLevel} compact />
+                  </div>
+                  <div>
+                    <h3>{module.title}</h3>
+                    <p>{module.subtitle}</p>
+                  </div>
+                  <p>{module.detail}</p>
+                  <div className="module-score">
+                    <small>最近安全评分</small>
+                    <strong>{status.score}</strong>
+                  </div>
+                  <button onClick={() => setPage(module.id)}>进入模块</button>
+                </article>
+              );
+            })}
           </section>
 
           <div className="dashboard-grid">
@@ -424,8 +373,8 @@ export default function App() {
               <div className="section-title">
                 <span>S</span>
                 <div>
-                  <h3>安全态势</h3>
-                  <p>根据最近检测记录生成今日安全评分。</p>
+                  <h3>平台安全态势</h3>
+                  <p>结合最近检测记录与当前会话报告生成今日评分。</p>
                 </div>
               </div>
               <div className="score-meter">
@@ -434,14 +383,14 @@ export default function App() {
               </div>
               <div className="posture-row">
                 <span>高风险记录</span>
-                <strong>{history.filter((item) => item.riskLevel === 'high').length}</strong>
+                <strong>{mergedHistory.filter((item) => item.riskLevel === 'high').length}</strong>
               </div>
               <div className="posture-row">
                 <span>最近检测</span>
-                <strong>{history.length}</strong>
+                <strong>{mergedHistory.length}</strong>
               </div>
             </section>
-            <HistoryList records={history} />
+            <HistoryTimeline records={mergedHistory} />
           </div>
         </>
       )}
@@ -451,7 +400,7 @@ export default function App() {
           <PageHero
             eyebrow="Privacy Sentinel"
             title="隐私哨兵"
-            copy="图片分享前隐私检测与一键打码，保留原有完整检测、标注、处理和历史记录能力。"
+            copy="图片分享前隐私检测与打码，保留原有图片检测、标注、处理和历史记录能力，并增加处理前后对比与检测报告。"
             onBack={() => setPage('home')}
           />
           <div className="workflow-grid">
@@ -483,27 +432,34 @@ export default function App() {
               <div className="section-title">
                 <span>06</span>
                 <div>
-                  <h3>处理后图片</h3>
-                  <p>打码完成后在这里查看安全分享版本，确认无误后再对外发送。</p>
+                  <h3>原图 / 处理后对比</h3>
+                  <p>打码完成后对照检查，确认无误再对外分享。</p>
                 </div>
               </div>
-              {processedUrl ? (
-                <div className="safe-content">
-                  <img src={processedUrl} alt="处理后的安全图片" />
-                  <div className="safe-verdict">
-                    <span>安全预览</span>
-                    <b>已生成可分享复核版本</b>
-                    <p>高风险隐私区域已按当前策略处理。建议在正式分享前进行最后一次人工确认。</p>
-                  </div>
+              {processedUrl && detectResult ? (
+                <div className="comparison-grid">
+                  <ImageCompareCard title="原图" imageUrl={toAssetUrl(detectResult.originalImageUrl)} />
+                  <ImageCompareCard title="处理后" imageUrl={processedUrl} />
                 </div>
               ) : (
                 <div className="safe-empty">
                   <strong>等待打码处理</strong>
-                  <p className="muted">完成检测并点击一键打码后，这里会展示处理后的图片。</p>
+                  <p className="muted">完成检测并选择处理策略后，这里会展示原图与安全版本对比。</p>
                 </div>
               )}
             </section>
-            <HistoryList records={history} />
+            <RiskReport
+              title="分享前风险报告"
+              riskLevel={detectResult?.riskLevel}
+              score={privacyScore(detectResult)}
+              summary={detectResult?.summary}
+              evidence={evidenceFromPrivacy(detectResult)}
+              suggestions={[
+                '优先处理高风险区域，再复核中风险区域是否与分享目的有关。',
+                '如果图片包含二维码、证件、住址或联系方式，建议处理后再分享。',
+                '正式发布前查看处理后预览，避免误遮挡重要内容或遗漏隐私。'
+              ]}
+            />
           </div>
         </>
       )}
@@ -513,7 +469,7 @@ export default function App() {
           <PageHero
             eyebrow="Scam Radar"
             title="反诈雷达"
-            copy="输入聊天文本，基于规则识别奖学金补贴、刷单兼职、验证码索取、冒充客服等诈骗风险。"
+            copy="输入聊天文本，识别诱导转账、高额回报、催促决策、脱离平台、隐瞒他人、可疑链接等诈骗风险。"
             onBack={() => setPage('home')}
           />
           <div className="tool-grid">
@@ -522,7 +478,7 @@ export default function App() {
                 <span>01</span>
                 <div>
                   <h3>聊天文本分析</h3>
-                  <p>可粘贴聊天记录文本；聊天截图识别后也可把 OCR 文本放在这里检测。</p>
+                  <p>粘贴聊天记录或 OCR 后的截图文本，系统会输出风险证据和防骗建议。</p>
                 </div>
               </div>
               <textarea value={scamText} onChange={(event) => setScamText(event.target.value)} />
@@ -530,7 +486,14 @@ export default function App() {
                 {loadingScam ? '分析中...' : '开始风险识别'}
               </button>
             </section>
-            <ResultPanel title="诈骗风险结果" result={scamResult} />
+            <RiskReport
+              title="诈骗风险报告"
+              riskLevel={scamResult?.riskLevel}
+              score={scamResult?.score}
+              summary={scamResult ? `识别到 ${scamResult.reasons.length} 条风险证据。` : undefined}
+              evidence={scamResult?.reasons}
+              suggestions={scamResult?.suggestions}
+            />
           </div>
         </>
       )}
@@ -540,7 +503,7 @@ export default function App() {
           <PageHero
             eyebrow="Link Guard"
             title="链接卫士"
-            copy="输入 URL，检查 HTTPS、短链接、可疑关键词和域名异常，二维码解析后的链接也可复用此能力。"
+            copy="输入 URL 生成链接体检报告，检查 HTTPS、短链接、可疑关键词、异常域名、URL 过长、随机字符和可疑参数。"
             onBack={() => setPage('home')}
           />
           <div className="tool-grid">
@@ -548,16 +511,23 @@ export default function App() {
               <div className="section-title">
                 <span>01</span>
                 <div>
-                  <h3>URL 检测</h3>
-                  <p>先做规则检测，保证本地演示稳定运行。</p>
+                  <h3>URL 体检</h3>
+                  <p>二维码解析出的链接也可以粘贴到这里进行本地规则检测。</p>
                 </div>
               </div>
               <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com" />
               <button className="primary-button" disabled={loadingLink || !url.trim()} onClick={handleLinkCheck}>
-                {loadingLink ? '检测中...' : '检查链接风险'}
+                {loadingLink ? '检测中...' : '生成链接体检报告'}
               </button>
             </section>
-            <ResultPanel title="链接风险结果" result={linkResult} />
+            <RiskReport
+              title="链接体检报告"
+              riskLevel={linkResult?.riskLevel}
+              score={linkResult ? scoreFromRisk(linkResult.riskLevel) : undefined}
+              summary={linkResult ? `标准化链接：${linkResult.normalizedUrl}` : undefined}
+              evidence={linkResult?.checks}
+              suggestions={linkResult?.suggestions}
+            />
           </div>
         </>
       )}
@@ -567,7 +537,7 @@ export default function App() {
           <PageHero
             eyebrow="Doc Shield"
             title="提交护盾"
-            copy="输入提交要求并上传材料，系统会检查材料是否齐全、格式命名是否规范，并识别文件文本中的隐私安全风险。"
+            copy="按照“输入提交要求 + 上传材料 + 生成提交检查报告”的逻辑，检查材料完整性、格式规范、隐私风险、提交建议和安全评分。"
             onBack={() => setPage('home')}
           />
           <div className="tool-grid doc-tool-grid">
@@ -576,7 +546,7 @@ export default function App() {
                 <span>01</span>
                 <div>
                   <h3>提交要求与材料上传</h3>
-                  <p>支持 txt、md、pdf、docx 内容解析；png、jpg、zip 会先做文件名、后缀和上传状态检查。</p>
+                  <p>支持 txt、md、pdf、docx 内容解析；图片和压缩包会先检查文件名、后缀和上传状态。</p>
                 </div>
               </div>
               <textarea
@@ -605,83 +575,18 @@ export default function App() {
               <div className="capability-list">
                 <span>要求解析</span>
                 <span>完整性检查</span>
-                <span>格式命名检查</span>
-                <span>隐私风险检查</span>
+                <span>格式规范</span>
+                <span>隐私风险</span>
               </div>
               <button
                 className="primary-button"
                 disabled={loadingDoc || !docRequirement.trim() || docFiles.length === 0}
                 onClick={handleDocCheck}
               >
-                {loadingDoc ? '检查中...' : '开始检查'}
+                {loadingDoc ? '检查中...' : '生成提交检查报告'}
               </button>
             </section>
             <DocReportPanel result={docResult} />
-          </div>
-        </>
-      )}
-
-      {false && page === 'doc' && (
-        <>
-          <PageHero
-            eyebrow="Doc Shield"
-            title="提交护盾"
-            copy="作业、报名材料、报告提交前的隐私与格式检查。当前为静态 / mock 能力展示。"
-            onBack={() => setPage('home')}
-          />
-          <div className="tool-grid">
-            <section className="card form-card">
-              <div className="section-title">
-                <span>01</span>
-                <div>
-                  <h3>材料名称检查</h3>
-                  <p>输入拟提交文件名，演示文件命名、隐私检查、材料清单检查三类能力。</p>
-                </div>
-              </div>
-              <input value={docName} onChange={(event) => setDocName(event.target.value)} />
-              <div className="capability-list">
-                <span>文件命名检查</span>
-                <span>隐私检查</span>
-                <span>材料清单检查</span>
-              </div>
-              <button className="primary-button" disabled={loadingDoc} onClick={handleDocCheck}>
-                {loadingDoc ? '检查中...' : '生成 Mock 检查结果'}
-              </button>
-            </section>
-            <section className="card result-card">
-              <div className="section-title">
-                <span>R</span>
-                <div>
-                  <h3>提交前检查结果</h3>
-                  <p>当前以 mock 数据展示完整交互闭环。</p>
-                </div>
-              </div>
-              {docResult ? (
-                <>
-                  <div className={`risk-banner ${docResult!.riskLevel}`}>
-                    <strong>{riskText[docResult!.riskLevel]}</strong>
-                    <span>已生成提交前检查建议</span>
-                  </div>
-                  <FindingList findings={docResult!.checks} />
-                  <div className="checklist">
-                    {docResult!.checklist?.map((item) => (
-                      <div className={item.status} key={item.item}>
-                        <strong>{item.item}</strong>
-                        <span>{item.status}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="suggestion-box">
-                    <strong>建议操作</strong>
-                    {docResult!.suggestions.map((suggestion) => (
-                      <p key={suggestion}>{suggestion}</p>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <p className="muted">点击按钮后展示文件命名、隐私与材料清单检查结果。</p>
-              )}
-            </section>
           </div>
         </>
       )}
@@ -709,5 +614,93 @@ function PageHero({
       </div>
       <button onClick={onBack}>返回安全中心</button>
     </header>
+  );
+}
+
+function ImageCompareCard({ title, imageUrl }: { title: string; imageUrl: string }) {
+  return (
+    <div className="compare-card">
+      <strong>{title}</strong>
+      <img src={imageUrl} alt={title} />
+    </div>
+  );
+}
+
+function DocReportPanel({ result }: { result: DocCheckResponse | null }) {
+  if (!result) {
+    return (
+      <RiskReport
+        title="提交检查报告"
+        emptyText="上传材料并开始检查后，这里会展示要求解析、材料完整性、格式规范、隐私风险、提交建议和安全评分。"
+      />
+    );
+  }
+
+  const groups = {
+    completeness: result.checks.filter((item) => item.category === 'completeness'),
+    format: result.checks.filter((item) => item.category === 'format'),
+    privacy: result.checks.filter((item) => item.category === 'privacy')
+  };
+
+  return (
+    <section className="card result-card doc-report">
+      <div className="section-title">
+        <span>R</span>
+        <div>
+          <h3>提交检查报告</h3>
+          <p>{result.summary}</p>
+        </div>
+      </div>
+      <div className={`risk-banner ${result.riskLevel}`}>
+        <RiskBadge level={result.riskLevel} />
+        <span>提交安全评分</span>
+        <b>{result.score} / 100</b>
+      </div>
+
+      <div className="parsed-requirements">
+        <h4>解析出的提交要求</h4>
+        <RequirementItem label="文件格式" value={result.parsedRequirements.formats.join('、') || '未明确'} />
+        <RequirementItem label="命名规则" value={result.parsedRequirements.namingRule || '未明确'} />
+        <RequirementItem label="必需材料" value={result.parsedRequirements.requiredMaterials.join('、') || '未明确'} />
+        <RequirementItem label="字数/页数" value={result.parsedRequirements.lengthRequirement || '未明确'} />
+        <RequirementItem label="截止时间" value={result.parsedRequirements.deadline || '未明确'} />
+      </div>
+
+      <DocCheckGroup title="材料完整性" items={groups.completeness} />
+      <DocCheckGroup title="格式规范" items={groups.format} />
+      <DocCheckGroup title="隐私风险" items={groups.privacy} />
+
+      <div className="uploaded-files">
+        <h4>已上传材料</h4>
+        {result.files.map((file) => (
+          <div key={file.fileName}>
+            <strong>{file.fileName}</strong>
+            <span>
+              .{file.extension || '无后缀'} / {file.status} / {file.wordCount} 字
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <SuggestionList suggestions={result.suggestions} />
+    </section>
+  );
+}
+
+function RequirementItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function DocCheckGroup({ title, items }: { title: string; items: DocCheckResponse['checks'] }) {
+  return (
+    <div className="doc-check-group">
+      <h4>{title}</h4>
+      <EvidenceList evidence={items} />
+    </div>
   );
 }

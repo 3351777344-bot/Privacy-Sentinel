@@ -1,5 +1,5 @@
 import type { PrivacyItem } from '../types/privacy';
-import { riskText } from './RiskSummary';
+import { RiskBadge } from './RiskComponents';
 
 interface PrivacyItemListProps {
   items: PrivacyItem[];
@@ -11,8 +11,8 @@ export default function PrivacyItemList({ items }: PrivacyItemListProps) {
       <div className="section-title">
         <span>04</span>
         <div>
-          <h3>检测项列表</h3>
-          <p>逐项展示隐私类型、识别文本、风险等级和处理建议。</p>
+          <h3>风险证据列表</h3>
+          <p>逐项展示隐私类型、识别内容、风险等级和处理建议。</p>
         </div>
       </div>
       {items.length === 0 ? (
@@ -25,7 +25,7 @@ export default function PrivacyItemList({ items }: PrivacyItemListProps) {
                 <strong>{item.label}</strong>
                 <span>{item.text}</span>
               </div>
-              <em className={`risk-pill ${item.riskLevel}`}>{riskText[item.riskLevel]}</em>
+              <RiskBadge level={item.riskLevel} compact />
               <p>{item.suggestion}</p>
             </article>
           ))}

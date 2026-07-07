@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PrivacyItem } from '../types/privacy';
-import { riskText } from './RiskSummary';
+import { riskText } from './RiskComponents';
 
 interface ImagePreviewProps {
   imageUrl?: string;
@@ -41,7 +41,7 @@ export default function ImagePreview({ imageUrl, items = [], title, emptyText }:
         <span>02</span>
         <div>
           <h3>{title}</h3>
-          <p>隐私检测框会跟随图片显示比例同步缩放，便于现场讲解。</p>
+          <p>检测框会跟随图片显示比例同步缩放，便于核对隐私位置。</p>
         </div>
       </div>
       {imageUrl ? (
@@ -72,7 +72,9 @@ export default function ImagePreview({ imageUrl, items = [], title, emptyText }:
                 height: item.box.height * scaleY
               }}
             >
-              <span>{item.label} / {riskText[item.riskLevel]}</span>
+              <span>
+                {item.label} / {riskText[item.riskLevel]}
+              </span>
             </div>
           ))}
         </div>

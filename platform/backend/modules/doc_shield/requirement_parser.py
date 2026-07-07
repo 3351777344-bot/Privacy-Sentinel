@@ -63,12 +63,12 @@ def parse_requirement(requirement_text: str) -> dict[str, Any]:
     for pattern in naming_patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
-            naming_rule = match.group(1).strip(" ：:。；;")
+            naming_rule = match.group(1).strip(" ：，。；;")
             break
 
     length_requirement = None
     length_match = re.search(
-        r"((?:不少于|不低于|至少|约|控制在|限)?\s*\d{1,5}\s*(?:[-~至到]\s*\d{1,5})?\s*(?:字|页|word|words|page|pages))",
+        r"((?:不少于|不低于|至少|约|控制在|限制?)\s*\d{1,5}\s*(?:[-~至到]\s*\d{1,5})?\s*(?:字|页|word|words|page|pages))",
         text,
         flags=re.IGNORECASE,
     )

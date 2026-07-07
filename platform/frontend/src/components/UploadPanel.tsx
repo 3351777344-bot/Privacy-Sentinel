@@ -20,10 +20,10 @@ export default function UploadPanel({ loading, onDetect }: UploadPanelProps) {
         <span>01</span>
         <div>
           <h3>图片上传</h3>
-          <p>选择截图、快递单、订单页或聊天记录，先让 AI 扫描潜在隐私风险。</p>
+          <p>选择截图、快递单、订单页或聊天记录，先扫描潜在隐私风险。</p>
         </div>
       </div>
-      <div className="upload-box" onClick={() => inputRef.current?.click()}>
+      <div className="upload-box" onClick={() => inputRef.current?.click()} role="button" tabIndex={0}>
         <input
           ref={inputRef}
           type="file"

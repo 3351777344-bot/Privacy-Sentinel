@@ -42,12 +42,13 @@ def check_format(files: list[ExtractedFile], parsed_requirements: dict[str, Any]
 
     if required_formats:
         for required_format in required_formats:
-            if required_format in uploaded_extensions:
+            matched = [file.fileName for file in files if file.extension.lower() == required_format]
+            if matched:
                 checks.append(
                     {
                         "category": "format",
                         "label": f"已上传 {required_format} 格式材料",
-                        "evidence": "、".join(file.fileName for file in files if file.extension == required_format),
+                        "evidence": "、".join(matched),
                         "riskLevel": "low",
                         "status": "pass",
                     }
