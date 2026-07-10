@@ -1,4 +1,5 @@
 import re
+from ipaddress import ip_address
 from urllib.parse import parse_qs, urlparse
 
 
@@ -13,7 +14,7 @@ def normalize_url(raw_url: str) -> str:
     text = raw_url.strip()
     if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", text):
         return text
-    return f"http://{text}"
+    return f"https://{text}"
 
 
 def _check(check_id: str, label: str, status: str, risk_level: str, message: str) -> dict:
@@ -21,9 +22,11 @@ def _check(check_id: str, label: str, status: str, risk_level: str, message: str
 
 
 def _is_ip(host: str) -> bool:
-    if not re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", host):
+    try:
+        ip_address(host)
+        return True
+    except ValueError:
         return False
-    return all(0 <= int(part) <= 255 for part in host.split("."))
 
 
 def _has_random_token(text: str) -> bool:
@@ -37,6 +40,13 @@ def run_url_rules(normalized_url: str) -> tuple[list[dict], list[dict]]:
     checks: list[dict] = []
     suspicious_params: list[dict] = []
 
+    if parsed.scheme not in {"http", "https"}:
+        checks.append(_check("link_000", "协议合法性", "fail", "high", "仅允许检查和打开 HTTP/HTTPS 链接。"))
+    if not host:
+        checks.append(_check("link_000_host", "域名检查", "fail", "high", "链接缺少有效域名。"))
+    if parsed.username or parsed.password:
+        checks.append(_check("link_000_auth", "URL 身份信息", "fail", "high", "链接在域名前包含用户名或密码，可能用于隐藏真实域名。"))
+
     if parsed.scheme == "https":
         checks.append(_check("link_001", "HTTPS 检查", "pass", "low", "该链接使用 HTTPS 加密传输。"))
     else:
@@ -49,6 +59,14 @@ def run_url_rules(normalized_url: str) -> tuple[list[dict], list[dict]]:
 
     if _is_ip(host):
         checks.append(_check("link_003", "IP 地址直连", "fail", "high", "链接直接使用 IP 地址，缺少可信域名背书。"))
+        try:
+            if ip_address(host).is_private or ip_address(host).is_loopback:
+                checks.append(_check("link_003_private", "内网地址", "fail", "high", "链接指向内网或本机地址，不应作为公开链接打开。"))
+        except ValueError:
+            pass
+
+    if "xn--" in host:
+        checks.append(_check("link_003_idn", "国际化域名", "warning", "medium", "域名包含 Punycode，需警惕视觉相似字符仿冒。"))
 
     if len(host) > 45 or host.count(".") >= 4:
         checks.append(_check("link_004", "域名结构", "warning", "medium", "域名过长或子域层级较多，可能用于混淆真实来源。"))
@@ -85,4 +103,3 @@ def run_url_rules(normalized_url: str) -> tuple[list[dict], list[dict]]:
         checks.append(_check("link_010", "基础结构", "pass", "low", "未发现明显结构风险。"))
 
     return checks, suspicious_params
-

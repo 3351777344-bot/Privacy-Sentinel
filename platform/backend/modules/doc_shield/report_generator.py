@@ -1,29 +1,18 @@
 from typing import Any
 
+from modules.risk_scoring import calculate_security_score, highest_risk
+
 from .file_extractor import ExtractedFile
 
 
 def _score_for_checks(checks: list[dict[str, Any]]) -> int:
-    score = 100
-    for check in checks:
-        if check.get("status") == "fail":
-            score -= 18
-        elif check.get("status") == "warning":
-            score -= 9
-
-        if check.get("riskLevel") == "high":
-            score -= 8
-        elif check.get("riskLevel") == "medium":
-            score -= 4
-    return max(0, min(100, score))
+    levels = [check["riskLevel"] for check in checks if check.get("status") != "pass"]
+    return calculate_security_score(levels)
 
 
 def _risk_level(score: int, checks: list[dict[str, Any]]) -> str:
-    if any(check.get("riskLevel") == "high" for check in checks) or score < 60:
-        return "high"
-    if any(check.get("riskLevel") == "medium" for check in checks) or score < 85:
-        return "medium"
-    return "low"
+    levels = [check["riskLevel"] for check in checks if check.get("status") != "pass"]
+    return highest_risk(levels)
 
 
 def _suggestions(checks: list[dict[str, Any]]) -> list[str]:

@@ -135,6 +135,12 @@ export function HistoryTimeline({
   title = '最近安全检测历史',
   description = '记录最近的检测结果，方便复盘处理状态和风险变化。'
 }: HistoryTimelineProps) {
+  const moduleLabels = {
+    privacy: '隐私哨兵',
+    code: '代码卫士',
+    link: '链接卫士',
+    doc: '提交护盾'
+  };
   return (
     <section className="card history-card">
       <div className="section-title">
@@ -149,11 +155,12 @@ export function HistoryTimeline({
       ) : (
         <div className="history-list timeline-list">
           {records.slice(0, 8).map((record) => (
-            <article className="history-item timeline-item" key={`${record.imageId}-${record.createdAt}`}>
+            <article className="history-item timeline-item" key={record.recordId || `${record.imageId}-${record.createdAt}`}>
               <div>
                 <strong>{record.summary}</strong>
                 <span>
-                  {record.imageId} · {record.createdAt}
+                  {moduleLabels[record.module ?? 'privacy']} · {record.score ?? '--'} 分 ·{' '}
+                  {new Date(record.createdAt).toLocaleString('zh-CN', { hour12: false })}
                 </span>
               </div>
               <RiskBadge level={record.riskLevel} compact />

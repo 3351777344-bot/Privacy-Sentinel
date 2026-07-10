@@ -1,4 +1,4 @@
-PENALTY = {"high": 30, "medium": 15, "low": 0}
+from modules.risk_scoring import calculate_security_score, highest_risk
 
 
 def build_link_report(normalized_url: str, checks: list[dict], suspicious_params: list[dict], source_risk: dict) -> dict:
@@ -6,13 +6,8 @@ def build_link_report(normalized_url: str, checks: list[dict], suspicious_params
     if source_risk["riskLevel"] in {"high", "medium"}:
         risk_items.append(source_risk["riskLevel"])
 
-    score = max(0, 100 - sum(PENALTY.get(level, 0) for level in risk_items))
-    if "high" in risk_items:
-        risk_level = "high"
-    elif "medium" in risk_items:
-        risk_level = "medium"
-    else:
-        risk_level = "low"
+    score = calculate_security_score(risk_items)
+    risk_level = highest_risk(risk_items)
 
     warnings = [item["label"] for item in checks if item["status"] != "pass"]
     if source_risk["riskLevel"] != "low":
@@ -45,4 +40,3 @@ def build_link_report(normalized_url: str, checks: list[dict], suspicious_params
         "suggestions": suggestions,
         "shouldOpen": risk_level == "low",
     }
-

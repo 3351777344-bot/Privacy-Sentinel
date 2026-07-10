@@ -5,16 +5,6 @@ interface RiskSummaryProps {
   result?: DetectResult | null;
 }
 
-function privacyScore(result?: DetectResult | null) {
-  if (!result) return 100;
-  const penalty = result.items.reduce((total, item) => {
-    if (item.riskLevel === 'high') return total + 18;
-    if (item.riskLevel === 'medium') return total + 9;
-    return total + 2;
-  }, 0);
-  return Math.max(0, 100 - penalty);
-}
-
 export default function RiskSummary({ result }: RiskSummaryProps) {
   const counts = {
     high: result?.items.filter((item) => item.riskLevel === 'high').length ?? 0,
@@ -38,13 +28,13 @@ export default function RiskSummary({ result }: RiskSummaryProps) {
         <span>03</span>
         <div>
           <h3>隐私检测报告</h3>
-          <p>检测图片中的高、中、低风险隐私信息，并给出分享前处理建议。</p>
+          <p>{result.detectorMessage}</p>
         </div>
       </div>
       <div className={`risk-banner ${result.riskLevel}`}>
         <strong>{riskText[result.riskLevel]}</strong>
         <span>{result.summary}</span>
-        <b>{privacyScore(result)} / 100</b>
+        <b>{result.score} / 100</b>
       </div>
       <div className="stats-grid">
         <div>

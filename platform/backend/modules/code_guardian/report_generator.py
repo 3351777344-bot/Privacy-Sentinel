@@ -1,21 +1,17 @@
-RISK_PENALTY = {"high": 25, "medium": 15, "low": 5}
+from modules.risk_scoring import calculate_security_score, highest_risk
+
+from .language_detector import LanguageDetection
 
 
 def calculate_score(vulnerabilities: list[dict]) -> int:
-    penalty = sum(RISK_PENALTY.get(item["riskLevel"], 0) for item in vulnerabilities)
-    return max(0, 100 - penalty)
+    return calculate_security_score([item["riskLevel"] for item in vulnerabilities])
 
 
 def calculate_risk_level(vulnerabilities: list[dict]) -> str:
-    levels = {item["riskLevel"] for item in vulnerabilities}
-    if "high" in levels:
-        return "high"
-    if "medium" in levels:
-        return "medium"
-    return "low"
+    return highest_risk([item["riskLevel"] for item in vulnerabilities])
 
 
-def build_report(language: str, vulnerabilities: list[dict]) -> dict:
+def build_report(detection: LanguageDetection, vulnerabilities: list[dict]) -> dict:
     risk_level = calculate_risk_level(vulnerabilities)
     score = calculate_score(vulnerabilities)
     suggestions = list(dict.fromkeys(item["suggestion"] for item in vulnerabilities))
@@ -37,9 +33,10 @@ def build_report(language: str, vulnerabilities: list[dict]) -> dict:
         "riskLevel": risk_level,
         "score": score,
         "summary": summary,
-        "language": language,
+        "language": detection.language,
+        "languageSource": detection.source,
+        "languageConfidence": detection.confidence,
         "vulnerabilities": vulnerabilities,
         "suggestions": suggestions,
         "shouldSubmit": risk_level == "low",
     }
-

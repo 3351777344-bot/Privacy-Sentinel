@@ -1,16 +1,16 @@
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 RiskLevel = Literal["high", "medium", "low"]
 
 
 class Box(BaseModel):
-    x: int
-    y: int
-    width: int
-    height: int
+    x: int = Field(ge=-100_000, le=100_000)
+    y: int = Field(ge=-100_000, le=100_000)
+    width: int = Field(gt=0, le=100_000)
+    height: int = Field(gt=0, le=100_000)
 
 
 class PrivacyItem(BaseModel):
@@ -27,14 +27,17 @@ class DetectResponse(BaseModel):
     imageId: str
     originalImageUrl: str
     riskLevel: RiskLevel
+    score: int = Field(ge=0, le=100)
     summary: str
+    detectorMode: Literal["ocr", "demo", "unavailable"]
+    detectorMessage: str
     items: List[PrivacyItem]
 
 
 class MaskRequest(BaseModel):
-    imageId: str
-    maskType: str
-    items: List[Box]
+    imageId: str = Field(pattern=r"^img_[a-f0-9]{12}$")
+    maskType: Literal["black", "blur", "mosaic"]
+    items: List[Box] = Field(min_length=1, max_length=100)
 
 
 class MaskResponse(BaseModel):
@@ -43,13 +46,24 @@ class MaskResponse(BaseModel):
 
 
 class HistoryRecord(BaseModel):
-    imageId: str
-    originalImageUrl: str
+    recordId: str = ""
+    module: Literal["privacy", "code", "link", "doc"] = "privacy"
+    imageId: str = ""
+    originalImageUrl: str = ""
     processedImageUrl: Optional[str] = None
     riskLevel: RiskLevel
+    score: Optional[int] = Field(default=None, ge=0, le=100)
     summary: str
     createdAt: str
     status: str
+
+
+class HistoryCreate(BaseModel):
+    module: Literal["code", "link", "doc"]
+    riskLevel: RiskLevel
+    score: int = Field(ge=0, le=100)
+    summary: str = Field(min_length=1, max_length=1000)
+    status: str = Field(default="已生成报告", min_length=1, max_length=100)
 
 
 class TextFinding(BaseModel):
@@ -79,6 +93,8 @@ class CodeAnalyzeResponse(BaseModel):
     score: int
     summary: str
     language: str
+    languageSource: Literal["explicit", "filename", "content", "fallback"]
+    languageConfidence: float = Field(ge=0, le=1)
     vulnerabilities: List[CodeVulnerability]
     suggestions: List[str]
     shouldSubmit: bool

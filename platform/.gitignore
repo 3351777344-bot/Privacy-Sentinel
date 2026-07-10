@@ -4,7 +4,9 @@ frontend/.npm-cache/
 frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
+.env
 backend/**/__pycache__/
+backend/data/*.db*
 backend/static/uploads/*
 backend/static/processed/*
 !backend/static/uploads/.gitkeep

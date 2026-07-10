@@ -22,15 +22,21 @@ export interface DetectResult {
   imageId: string;
   originalImageUrl: string;
   riskLevel: RiskLevel;
+  score: number;
   summary: string;
+  detectorMode: 'ocr' | 'demo' | 'unavailable';
+  detectorMessage: string;
   items: PrivacyItem[];
 }
 
 export interface HistoryRecord {
+  recordId?: string;
+  module?: 'privacy' | 'code' | 'link' | 'doc';
   imageId: string;
   originalImageUrl: string;
   processedImageUrl?: string | null;
   riskLevel: RiskLevel;
+  score?: number | null;
   summary: string;
   createdAt: string;
   status: string;
@@ -63,6 +69,8 @@ export interface CodeAnalyzeResponse {
   score: number;
   summary: string;
   language: string;
+  languageSource: 'explicit' | 'filename' | 'content' | 'fallback';
+  languageConfidence: number;
   vulnerabilities: CodeVulnerability[];
   suggestions: string[];
   shouldSubmit: boolean;

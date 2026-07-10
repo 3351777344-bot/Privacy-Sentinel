@@ -27,15 +27,15 @@ export default function UploadPanel({ loading, onDetect }: UploadPanelProps) {
         <input
           ref={inputRef}
           type="file"
-          accept="image/*"
+          accept=".png,.jpg,.jpeg,.webp"
           onChange={(event) => setFile(event.target.files?.[0] ?? null)}
         />
         <span className="upload-icon">+</span>
         <strong>{file ? file.name : '点击选择本地图片'}</strong>
-        <span>支持常见图片格式，检测完成后会在原图上标注隐私框。</span>
+        <span>支持 PNG / JPG / WEBP，单张不超过 10 MB。</span>
       </div>
       <button className="primary-button" disabled={!file || loading} onClick={handleSubmit}>
-        {loading ? 'AI 检测中...' : '开始隐私检测'}
+        {loading ? '本地 OCR 检测中...' : '开始隐私检测'}
       </button>
     </section>
   );

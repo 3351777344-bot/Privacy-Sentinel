@@ -48,6 +48,20 @@ export async function fetchHistory(): Promise<HistoryRecord[]> {
   return parseResponse<HistoryRecord[]>(response);
 }
 
+export async function saveHistory(
+  module: 'code' | 'link' | 'doc',
+  riskLevel: HistoryRecord['riskLevel'],
+  score: number,
+  summary: string
+): Promise<HistoryRecord> {
+  const response = await fetch(`${API_BASE_URL}/api/history`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ module, riskLevel, score, summary, status: '已生成报告' })
+  });
+  return parseResponse<HistoryRecord>(response);
+}
+
 export async function analyzeCode(language: string, code: string, file?: File | null): Promise<CodeAnalyzeResponse> {
   if (file) {
     const formData = new FormData();

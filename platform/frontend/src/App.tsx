@@ -6,6 +6,7 @@ import {
   detectImage,
   fetchHistory,
   maskImage,
+  saveHistory,
   toAssetUrl
 } from './api/privacyApi';
 import ImagePreview from './components/ImagePreview';
@@ -84,9 +85,11 @@ const sampleDocRequirement =
   '课程论文提交要求：请于 2026 年 7 月 10 日 18:00 前提交 PDF 文件，命名规则为 学号-姓名-课程论文。材料需包含封面、摘要、正文、参考文献；正文不少于 3000 字。';
 
 const languageOptions = [
+  { value: 'auto', label: '自动识别' },
   { value: 'python', label: 'Python' },
   { value: 'java', label: 'Java' },
-  { value: 'javascript', label: 'JavaScript / TypeScript' },
+  { value: 'javascript', label: 'JavaScript' },
+  { value: 'typescript', label: 'TypeScript' },
   { value: 'sql', label: 'SQL' },
   { value: 'other', label: 'Other' }
 ];
@@ -100,38 +103,16 @@ function scoreFromRisk(level: RiskLevel) {
 }
 
 function privacyScore(result?: DetectResult | null) {
-  if (!result) return undefined;
-  const penalty = result.items.reduce((total, item) => {
-    if (item.riskLevel === 'high') return total + 18;
-    if (item.riskLevel === 'medium') return total + 9;
-    return total + 2;
-  }, 0);
-  return Math.max(0, 100 - penalty);
+  return result?.score;
 }
 
 function overallScore(records: HistoryRecord[], latestScores: Array<number | undefined>) {
-  const recordPenalty = records.slice(0, 6).reduce((total, record) => {
-    if (record.riskLevel === 'high') return total + 9;
-    if (record.riskLevel === 'medium') return total + 5;
-    return total + 1;
-  }, 0);
   const activeScores = latestScores.filter((score): score is number => typeof score === 'number');
-  const sessionAverage = activeScores.length
-    ? Math.round(activeScores.reduce((total, score) => total + score, 0) / activeScores.length)
-    : 96;
-  return Math.max(45, Math.min(100, Math.round((sessionAverage + (96 - recordPenalty)) / 2)));
-}
-
-function makeHistoryRecord(moduleName: string, riskLevel: RiskLevel, summary: string, status = '已生成报告'): HistoryRecord {
-  return {
-    imageId: moduleName,
-    originalImageUrl: '',
-    processedImageUrl: null,
-    riskLevel,
-    summary,
-    createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
-    status
-  };
+  const persistedScores = ['privacy', 'code', 'link', 'doc']
+    .map((module) => records.find((record) => (record.module ?? 'privacy') === module)?.score)
+    .filter((score): score is number => typeof score === 'number');
+  const scores = activeScores.length ? activeScores : persistedScores;
+  return scores.length ? Math.round(scores.reduce((total, score) => total + score, 0) / scores.length) : 96;
 }
 
 function evidenceFromPrivacy(result?: DetectResult | null): TextFinding[] {
@@ -169,14 +150,13 @@ export default function App() {
   const [detectResult, setDetectResult] = useState<DetectResult | null>(null);
   const [processedUrl, setProcessedUrl] = useState('');
   const [history, setHistory] = useState<HistoryRecord[]>([]);
-  const [sessionHistory, setSessionHistory] = useState<HistoryRecord[]>([]);
   const [maskType, setMaskType] = useState<MaskType>('black');
   const [loadingDetect, setLoadingDetect] = useState(false);
   const [loadingMask, setLoadingMask] = useState(false);
   const [error, setError] = useState('');
 
   const [codeText, setCodeText] = useState(sampleCode);
-  const [codeLanguage, setCodeLanguage] = useState('python');
+  const [codeLanguage, setCodeLanguage] = useState('auto');
   const [codeFile, setCodeFile] = useState<File | null>(null);
   const [codeResult, setCodeResult] = useState<CodeAnalyzeResponse | null>(null);
   const [loadingCode, setLoadingCode] = useState(false);
@@ -204,7 +184,7 @@ export default function App() {
     refreshHistory();
   }, []);
 
-  const mergedHistory = useMemo(() => [...sessionHistory, ...history], [sessionHistory, history]);
+  const mergedHistory = history;
   const score = useMemo(
     () =>
       overallScore(mergedHistory, [
@@ -217,26 +197,31 @@ export default function App() {
   );
 
   const moduleStatus = useMemo(() => {
+    const latest = (module: 'privacy' | 'code' | 'link' | 'doc') => history.find((item) => (item.module ?? 'privacy') === module);
+    const latestPrivacy = latest('privacy');
+    const latestCode = latest('code');
+    const latestLink = latest('link');
+    const latestDoc = latest('doc');
     return {
       privacy: {
-        riskLevel: detectResult?.riskLevel ?? history[0]?.riskLevel ?? ('low' as RiskLevel),
-        score: privacyScore(detectResult) ?? (history[0] ? scoreFromRisk(history[0].riskLevel) : 92),
-        status: detectResult ? detectResult.summary : history[0]?.summary ?? '等待图片检测'
+        riskLevel: detectResult?.riskLevel ?? latestPrivacy?.riskLevel ?? ('low' as RiskLevel),
+        score: privacyScore(detectResult) ?? latestPrivacy?.score ?? (latestPrivacy ? scoreFromRisk(latestPrivacy.riskLevel) : 92),
+        status: detectResult ? detectResult.summary : latestPrivacy?.summary ?? '等待图片检测'
       },
       code: {
-        riskLevel: codeResult?.riskLevel ?? ('low' as RiskLevel),
-        score: codeResult?.score ?? 92,
-        status: codeResult ? `发现 ${codeResult.vulnerabilities.length} 项代码风险` : '等待代码检测'
+        riskLevel: codeResult?.riskLevel ?? latestCode?.riskLevel ?? ('low' as RiskLevel),
+        score: codeResult?.score ?? latestCode?.score ?? (latestCode ? scoreFromRisk(latestCode.riskLevel) : 92),
+        status: codeResult ? `发现 ${codeResult.vulnerabilities.length} 项代码风险` : latestCode?.summary ?? '等待代码检测'
       },
       link: {
-        riskLevel: linkResult?.riskLevel ?? ('low' as RiskLevel),
-        score: linkResult?.score ?? 92,
-        status: linkResult ? `完成 ${linkResult.checks.length} 项链接体检` : '等待链接体检'
+        riskLevel: linkResult?.riskLevel ?? latestLink?.riskLevel ?? ('low' as RiskLevel),
+        score: linkResult?.score ?? latestLink?.score ?? (latestLink ? scoreFromRisk(latestLink.riskLevel) : 92),
+        status: linkResult ? `完成 ${linkResult.checks.length} 项链接体检` : latestLink?.summary ?? '等待链接体检'
       },
       doc: {
-        riskLevel: docResult?.riskLevel ?? ('low' as RiskLevel),
-        score: docResult?.score ?? 92,
-        status: docResult?.summary ?? '等待材料检查'
+        riskLevel: docResult?.riskLevel ?? latestDoc?.riskLevel ?? ('low' as RiskLevel),
+        score: docResult?.score ?? latestDoc?.score ?? (latestDoc ? scoreFromRisk(latestDoc.riskLevel) : 92),
+        status: docResult?.summary ?? latestDoc?.summary ?? '等待材料检查'
       }
     };
   }, [detectResult, docResult, history, linkResult, codeResult]);
@@ -289,10 +274,8 @@ export default function App() {
     try {
       const result = await analyzeCode(codeLanguage, codeText, codeFile);
       setCodeResult(result);
-      setSessionHistory((current) => [
-        makeHistoryRecord('Code Guardian 代码卫士', result.riskLevel, result.summary),
-        ...current
-      ]);
+      await saveHistory('code', result.riskLevel, result.score, result.summary);
+      await refreshHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : '代码安全检测失败，请稍后重试。');
     } finally {
@@ -306,10 +289,8 @@ export default function App() {
     try {
       const result = await checkLink(url, linkSource);
       setLinkResult(result);
-      setSessionHistory((current) => [
-        makeHistoryRecord('Link Guard 链接卫士', result.riskLevel, result.summary),
-        ...current
-      ]);
+      await saveHistory('link', result.riskLevel, result.score, result.summary);
+      await refreshHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : '链接安全体检失败，请稍后重试。');
     } finally {
@@ -323,10 +304,8 @@ export default function App() {
     try {
       const result = await checkDoc(docRequirement, docFiles);
       setDocResult(result);
-      setSessionHistory((current) => [
-        makeHistoryRecord('Doc Shield 提交护盾', result.riskLevel, result.summary),
-        ...current
-      ]);
+      await saveHistory('doc', result.riskLevel, result.score, result.summary);
+      await refreshHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : '材料检查失败，请稍后重试。');
     } finally {
@@ -531,6 +510,12 @@ export default function App() {
                   ))}
                 </select>
               </label>
+              {codeResult && (
+                <p className="muted">
+                  识别语言：{codeResult.language}（来源：{codeResult.languageSource}，置信度：
+                  {Math.round(codeResult.languageConfidence * 100)}%）
+                </p>
+              )}
               <textarea value={codeText} onChange={(event) => setCodeText(event.target.value)} />
               <label className="upload-box doc-upload-box">
                 <input

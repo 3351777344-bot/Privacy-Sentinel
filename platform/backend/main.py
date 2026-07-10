@@ -1,8 +1,9 @@
 import json
+import logging
 import re
-import shutil
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -10,7 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 
-from detector.mock_detector import detect_privacy_items
+from config import settings
+from detector.privacy_detector import detect_privacy_items
 from image_processor.blur import apply_blur_mask
 from image_processor.mask import apply_black_mask
 from image_processor.mosaic import apply_mosaic_mask
@@ -27,6 +29,7 @@ from schemas.models import (
     DetectResponse,
     DocCheckResponse,
     HistoryRecord,
+    HistoryCreate,
     LinkCheckRequest,
     LinkCheckResponse,
     MaskRequest,
@@ -35,54 +38,60 @@ from schemas.models import (
     ScamAnalyzeResponse,
     TextFinding,
 )
+from storage.history_store import HistoryStore
 
 
 BASE_DIR = Path(__file__).resolve().parent
+logger = logging.getLogger("guardianhub")
 UPLOAD_DIR = BASE_DIR / "static" / "uploads"
 PROCESSED_DIR = BASE_DIR / "static" / "processed"
 HISTORY_FILE = BASE_DIR / "data" / "history.json"
+HISTORY_DATABASE = BASE_DIR / "data" / "guardianhub.db"
 
-for directory in [UPLOAD_DIR, PROCESSED_DIR, HISTORY_FILE.parent]:
+for directory in [UPLOAD_DIR, PROCESSED_DIR, HISTORY_DATABASE.parent]:
     directory.mkdir(parents=True, exist_ok=True)
-if not HISTORY_FILE.exists():
-    HISTORY_FILE.write_text("[]", encoding="utf-8")
+history_store = HistoryStore(HISTORY_DATABASE, HISTORY_FILE)
+Image.MAX_IMAGE_PIXELS = settings.max_image_pixels
 
 app = FastAPI(title="GuardianHub API", version="0.5.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=list(settings.cors_origins),
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
-def _load_history() -> list[dict]:
-    try:
-        return json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return []
-
-
-def _save_history(records: list[dict]) -> None:
-    HISTORY_FILE.write_text(json.dumps(records[:20], ensure_ascii=False, indent=2), encoding="utf-8")
-
-
 def _append_history(record: HistoryRecord) -> None:
-    records = _load_history()
-    records.insert(0, record.model_dump())
-    _save_history(records)
+    history_store.add(record.model_dump())
 
 
 def _update_processed_history(image_id: str, processed_url: str) -> None:
-    records = _load_history()
-    for record in records:
-        if record.get("imageId") == image_id:
-            record["processedImageUrl"] = processed_url
-            record["status"] = "已处理"
-            break
-    _save_history(records)
+    history_store.update_processed(image_id, processed_url)
+
+
+async def _read_upload_limited(file: UploadFile, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(min(1024 * 1024, max_bytes + 1 - total)):
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=413, detail=f"文件过大，最大允许 {max_bytes // (1024 * 1024)} MB。")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _cleanup_expired_files() -> None:
+    if settings.retention_hours <= 0:
+        return
+    cutoff = datetime.now().timestamp() - timedelta(hours=settings.retention_hours).total_seconds()
+    for directory in (UPLOAD_DIR, PROCESSED_DIR):
+        for path in directory.iterdir():
+            if path.is_file() and path.name != ".gitkeep" and path.stat().st_mtime < cutoff:
+                path.unlink(missing_ok=True)
+    history_store.delete_expired(settings.retention_hours)
 
 
 def _find_uploaded_image(image_id: str) -> Path:
@@ -111,38 +120,60 @@ def _decode_upload(content: bytes) -> str:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "message": "GuardianHub backend is running"}
+    return {
+        "status": "ok",
+        "message": "GuardianHub backend is running",
+        "privacyDetector": "demo" if settings.demo_mode else "ocr",
+    }
 
 
 @app.post("/api/detect", response_model=DetectResponse)
 async def detect(file: UploadFile = File(...)) -> DetectResponse:
+    _cleanup_expired_files()
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="请上传图片文件。")
 
-    extension = Path(file.filename or "upload.png").suffix.lower() or ".png"
-    image_id = f"img_{uuid.uuid4().hex[:12]}"
-    saved_path = UPLOAD_DIR / f"{image_id}{extension}"
-
-    with saved_path.open("wb") as target:
-        shutil.copyfileobj(file.file, target)
+    content = await _read_upload_limited(file, settings.max_image_bytes)
+    if not content:
+        raise HTTPException(status_code=400, detail="图片文件为空。")
 
     try:
-        with Image.open(saved_path) as image:
+        with Image.open(BytesIO(content)) as image:
             image.verify()
-    except (UnidentifiedImageError, OSError):
-        saved_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail="图片无法识别，请更换 PNG/JPG 等常见格式。")
+        with Image.open(BytesIO(content)) as image:
+            width, height = image.size
+            image_format = (image.format or "").upper()
+    except (Image.DecompressionBombError, UnidentifiedImageError, OSError):
+        raise HTTPException(status_code=400, detail="图片无法识别，或像素尺寸超过安全限制。")
+
+    format_extensions = {"PNG": ".png", "JPEG": ".jpg", "WEBP": ".webp"}
+    extension = format_extensions.get(image_format)
+    if extension is None:
+        raise HTTPException(status_code=400, detail="当前仅支持 PNG、JPEG、WEBP 图片。")
+    if width * height > settings.max_image_pixels:
+        raise HTTPException(status_code=413, detail="图片像素尺寸过大，请压缩后重试。")
+
+    image_id = f"img_{uuid.uuid4().hex[:12]}"
+    saved_path = UPLOAD_DIR / f"{image_id}{extension}"
+    saved_path.write_bytes(content)
 
     original_url = f"/static/uploads/{saved_path.name}"
-    result = detect_privacy_items(str(saved_path), image_id, original_url)
+    try:
+        result = detect_privacy_items(str(saved_path), image_id, original_url)
+    except Exception:
+        logger.exception("Privacy detector failed for image %s", image_id)
+        saved_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=503, detail="图片检测引擎暂不可用，请稍后重试。")
     _append_history(
         HistoryRecord(
+            module="privacy",
             imageId=image_id,
             originalImageUrl=original_url,
             processedImageUrl=None,
             riskLevel=result.riskLevel,
+            score=result.score,
             summary=result.summary,
-            createdAt=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            createdAt=datetime.now().astimezone().isoformat(timespec="seconds"),
             status="待处理",
         )
     )
@@ -151,11 +182,6 @@ async def detect(file: UploadFile = File(...)) -> DetectResponse:
 
 @app.post("/api/mask", response_model=MaskResponse)
 def mask_image(request: MaskRequest) -> MaskResponse:
-    if request.maskType not in {"black", "blur", "mosaic"}:
-        raise HTTPException(status_code=400, detail="maskType 仅支持 black、blur、mosaic。")
-    if not request.items:
-        raise HTTPException(status_code=400, detail="请至少选择一个需要处理的隐私区域。")
-
     image_path = _find_uploaded_image(request.imageId)
     with Image.open(image_path) as image:
         if request.maskType == "black":
@@ -176,7 +202,23 @@ def mask_image(request: MaskRequest) -> MaskResponse:
 
 @app.get("/api/history", response_model=list[HistoryRecord])
 def history() -> list[HistoryRecord]:
-    return [HistoryRecord(**record) for record in _load_history()]
+    _cleanup_expired_files()
+    return [HistoryRecord(**record) for record in history_store.list()]
+
+
+@app.post("/api/history", response_model=HistoryRecord)
+def create_history(request: HistoryCreate) -> HistoryRecord:
+    record = history_store.add(
+        {
+            "module": request.module,
+            "riskLevel": request.riskLevel,
+            "score": request.score,
+            "summary": request.summary,
+            "status": request.status,
+            "createdAt": datetime.now().astimezone().isoformat(timespec="seconds"),
+        }
+    )
+    return HistoryRecord(**record)
 
 
 @app.post("/api/code/analyze", response_model=CodeAnalyzeResponse)
@@ -199,14 +241,18 @@ async def analyze_code(request: Request) -> CodeAnalyzeResponse:
             raise HTTPException(status_code=400, detail="项目级 zip 扫描为后续扩展功能，请先上传单个代码文件。")
         if extension not in {".py", ".java", ".js", ".ts", ".sql", ".txt"}:
             raise HTTPException(status_code=400, detail="当前仅支持 .py、.java、.js、.ts、.sql、.txt 文件。")
-        code = _decode_upload(await upload.read())
+        code = _decode_upload(await _read_upload_limited(upload, settings.max_code_bytes))
     else:
         try:
             payload = await request.json()
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="请提交 JSON 或 multipart/form-data 请求。")
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="JSON 请求体必须是对象。")
         language = payload.get("language")
         code = str(payload.get("code") or "")
+        if len(code.encode("utf-8")) > settings.max_code_bytes:
+            raise HTTPException(status_code=413, detail="代码内容过大，最大允许 1 MB。")
 
     if not code.strip():
         raise HTTPException(status_code=400, detail="请输入或上传需要检测的代码。")
@@ -273,12 +319,22 @@ async def check_doc(
         raise HTTPException(status_code=400, detail="请输入提交要求。")
     if not files:
         raise HTTPException(status_code=400, detail="请至少上传一个材料文件。")
+    if len(files) > settings.max_doc_files:
+        raise HTTPException(status_code=413, detail=f"单次最多上传 {settings.max_doc_files} 个材料文件。")
 
     parsed_requirements = parse_requirement(requirement_text)
     extracted_files = []
+    total_bytes = 0
+    allowed_extensions = {".txt", ".md", ".pdf", ".docx", ".png", ".jpg", ".jpeg", ".zip"}
     for file in files:
-        content = await file.read()
         file_name = (file.filename or "未命名材料").strip()
+        extension = Path(file_name).suffix.lower()
+        if extension not in allowed_extensions:
+            raise HTTPException(status_code=400, detail=f"不支持的材料格式：{extension or '无后缀'}。")
+        content = await _read_upload_limited(file, settings.max_doc_bytes)
+        total_bytes += len(content)
+        if total_bytes > settings.max_doc_total_bytes:
+            raise HTTPException(status_code=413, detail="材料总大小超过 25 MB，请分批检查。")
         extracted_files.append(extract_file(file_name, file.content_type, content))
 
     checks = [

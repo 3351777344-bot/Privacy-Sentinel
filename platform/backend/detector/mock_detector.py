@@ -4,6 +4,7 @@ from typing import List
 from PIL import Image
 
 from detector.risk_classifier import classify_overall_risk
+from modules.risk_scoring import calculate_security_score
 from schemas.models import Box, DetectResponse, PrivacyItem
 
 
@@ -76,6 +77,9 @@ def detect_privacy_items(image_path: str, image_id: str, original_url: str) -> D
         imageId=image_id,
         originalImageUrl=original_url,
         riskLevel=risk_level,
+        score=calculate_security_score([item.riskLevel for item in items]),
         summary=summary,
+        detectorMode="demo",
+        detectorMessage="当前由 GUARDIANHUB_DEMO_MODE 显式启用演示检测框。",
         items=items,
     )

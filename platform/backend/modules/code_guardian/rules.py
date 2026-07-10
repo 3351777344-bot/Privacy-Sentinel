@@ -26,7 +26,7 @@ CODE_RULES = [
         title="疑似硬编码密钥",
         risk_level="high",
         patterns=(
-            _compile(r"\b(api[_-]?key|secret|token|password|access[_-]?key)\b\s*[:=]\s*['\"][^'\"]{6,}['\"]"),
+            _compile(r"\b(api[_-]?key|secret|token|password|access[_-]?key)\b\s*[:=]\s*(?:\(\s*)?['\"][^'\"]{6,}['\"]"),
             _compile(r"sk-[A-Za-z0-9_\-]{12,}"),
             _compile(r"AKIA[0-9A-Z]{12,}"),
             _compile(r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----"),
@@ -133,23 +133,33 @@ CODE_RULES = [
 def iter_findings(code: str, language: str) -> list[dict]:
     findings: list[dict] = []
     lines = code.splitlines()
+    flattened_code = code.replace("\n", " ")
     for rule in CODE_RULES:
         if rule.languages and language not in rule.languages:
             continue
-        for line_number, line in enumerate(lines, start=1):
-            if any(pattern.search(line) for pattern in rule.patterns):
-                findings.append(
-                    {
-                        "id": f"{rule.id}_{line_number}",
-                        "type": rule.type,
-                        "title": rule.title,
-                        "riskLevel": rule.risk_level,
-                        "line": line_number,
-                        "snippet": line.strip()[:240],
-                        "reason": rule.reason,
-                        "suggestion": rule.suggestion,
-                    }
-                )
-                break
+        candidates: list[re.Match[str]] = []
+        for pattern in rule.patterns:
+            for search_text in (code, flattened_code):
+                for match in pattern.finditer(search_text):
+                    original_segment = code[match.start() : match.end()]
+                    if original_segment.count("\n") <= 4:
+                        candidates.append(match)
+                        break
+        if not candidates:
+            continue
+        match = min(candidates, key=lambda item: item.start())
+        line_number = code.count("\n", 0, match.start()) + 1
+        snippet = "\n".join(lines[line_number - 1 : line_number + 4]).strip()[:240]
+        findings.append(
+            {
+                "id": f"{rule.id}_{line_number}",
+                "type": rule.type,
+                "title": rule.title,
+                "riskLevel": rule.risk_level,
+                "line": line_number,
+                "snippet": snippet,
+                "reason": rule.reason,
+                "suggestion": rule.suggestion,
+            }
+        )
     return findings
-
