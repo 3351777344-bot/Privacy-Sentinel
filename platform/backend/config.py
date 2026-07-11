@@ -41,6 +41,13 @@ class Settings:
     max_image_pixels: int = _int_env("GUARDIANHUB_MAX_IMAGE_PIXELS", 25_000_000)
     retention_hours: int = _int_env("GUARDIANHUB_RETENTION_HOURS", 24)
     demo_mode: bool = _bool_env("GUARDIANHUB_DEMO_MODE")
+    privacy_engine: str = os.getenv("GUARDIANHUB_PRIVACY_ENGINE", "agent").strip().lower()
+    ocr_engine: str = os.getenv("GUARDIANHUB_OCR_ENGINE", "rapidocr").strip().lower()
+    qr_engine: str = os.getenv("GUARDIANHUB_QR_ENGINE", "opencv").strip().lower()
+    face_engine: str = os.getenv("GUARDIANHUB_FACE_ENGINE", "disabled").strip().lower()
+    face_model_path: str = os.getenv("GUARDIANHUB_FACE_MODEL_PATH", "").strip()
+    default_mask_type: str = os.getenv("GUARDIANHUB_DEFAULT_MASK_TYPE", "mosaic").strip().lower()
+    enable_external_image_analysis: bool = _bool_env("GUARDIANHUB_ENABLE_EXTERNAL_IMAGE_ANALYSIS")
 
 
 settings = Settings()

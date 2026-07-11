@@ -9,6 +9,9 @@ oh_modules/
 __pycache__/
 **/__pycache__/
 *.py[cod]
+*.log
+.pytest_tmp*/
+**/.pytest_tmp*/
 local.properties
 *.hap
 *.hsp

@@ -16,6 +16,9 @@ export interface PrivacyItem {
   riskLevel: RiskLevel;
   box: Box;
   suggestion: string;
+  confidence?: number;
+  source?: 'ocr' | 'qr' | 'face' | 'rule' | 'vision_api' | 'demo';
+  recommendedMaskType?: MaskType;
 }
 
 export interface DetectResult {
@@ -24,7 +27,7 @@ export interface DetectResult {
   riskLevel: RiskLevel;
   score: number;
   summary: string;
-  detectorMode: 'ocr' | 'demo' | 'unavailable';
+  detectorMode: 'agent' | 'hybrid' | 'vision_api' | 'ocr' | 'demo' | 'unavailable';
   detectorMessage: string;
   items: PrivacyItem[];
 }

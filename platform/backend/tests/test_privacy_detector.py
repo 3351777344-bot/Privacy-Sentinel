@@ -1,4 +1,5 @@
 from detector.privacy_detector import findings_from_ocr
+from detector.privacy_detector import _detect_qr_codes
 
 
 BOX = [[10, 10], [300, 10], [300, 50], [10, 50]]
@@ -24,3 +25,20 @@ def test_low_confidence_ocr_text_is_ignored() -> None:
         ["13812345678"], [BOX], [0.2], 400, 200, "img_000000000000"
     )
     assert items == []
+
+
+def test_qr_detection_supports_unicode_paths(tmp_path) -> None:
+    import cv2
+    from PIL import Image
+
+    unicode_dir = tmp_path / "中文路径"
+    unicode_dir.mkdir()
+    image_path = unicode_dir / "qr.png"
+    params = cv2.QRCodeEncoder_Params()
+    params.version = 2
+    encoder = cv2.QRCodeEncoder_create(params)
+    qr = encoder.encode("guardianhub-qr-demo")
+    Image.fromarray(qr).save(image_path)
+
+    items = _detect_qr_codes(str(image_path), qr.shape[1], qr.shape[0], "img_000000000000")
+    assert [item.type for item in items] == ["qr_code"]

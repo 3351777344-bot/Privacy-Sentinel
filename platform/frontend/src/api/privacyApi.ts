@@ -43,6 +43,20 @@ export async function maskImage(imageId: string, maskType: MaskType, items: Box[
   return parseResponse<MaskResponse>(response);
 }
 
+export async function processPrivacyImage(
+  imageId: string,
+  maskType: MaskType,
+  scope: 'high' | 'all' | 'custom',
+  itemIds: string[] = []
+): Promise<MaskResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/privacy/process`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageId, maskType, scope, itemIds })
+  });
+  return parseResponse<MaskResponse>(response);
+}
+
 export async function fetchHistory(): Promise<HistoryRecord[]> {
   const response = await fetch(`${API_BASE_URL}/api/history`);
   return parseResponse<HistoryRecord[]>(response);

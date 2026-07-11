@@ -5,7 +5,7 @@ import {
   checkLink,
   detectImage,
   fetchHistory,
-  maskImage,
+  processPrivacyImage,
   saveHistory,
   toAssetUrl
 } from './api/privacyApi';
@@ -245,16 +245,8 @@ export default function App() {
     if (!detectResult) return;
     setLoadingMask(true);
     setError('');
-    const selectedItems = detectResult.items
-      .filter((item) => {
-        if (scope === 'all') return true;
-        if (scope === 'high') return item.riskLevel === 'high';
-        return selectedIds.includes(item.id);
-      })
-      .map((item) => item.box);
-
     try {
-      const result = await maskImage(detectResult.imageId, maskType, selectedItems);
+      const result = await processPrivacyImage(detectResult.imageId, maskType, scope, selectedIds);
       setProcessedUrl(toAssetUrl(result.processedImageUrl));
       await refreshHistory();
     } catch (err) {

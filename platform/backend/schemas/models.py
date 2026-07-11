@@ -4,6 +4,8 @@ from pydantic import BaseModel, Field
 
 
 RiskLevel = Literal["high", "medium", "low"]
+MaskType = Literal["black", "blur", "mosaic"]
+DetectorMode = Literal["agent", "hybrid", "vision_api", "ocr", "demo", "unavailable"]
 
 
 class Box(BaseModel):
@@ -21,6 +23,9 @@ class PrivacyItem(BaseModel):
     riskLevel: RiskLevel
     box: Box
     suggestion: str
+    confidence: float = Field(default=1.0, ge=0, le=1)
+    source: Literal["ocr", "qr", "face", "rule", "vision_api", "demo"] = "rule"
+    recommendedMaskType: MaskType = "mosaic"
 
 
 class DetectResponse(BaseModel):
@@ -29,20 +34,27 @@ class DetectResponse(BaseModel):
     riskLevel: RiskLevel
     score: int = Field(ge=0, le=100)
     summary: str
-    detectorMode: Literal["ocr", "demo", "unavailable"]
+    detectorMode: DetectorMode
     detectorMessage: str
     items: List[PrivacyItem]
 
 
 class MaskRequest(BaseModel):
     imageId: str = Field(pattern=r"^img_[a-f0-9]{12}$")
-    maskType: Literal["black", "blur", "mosaic"]
+    maskType: MaskType
     items: List[Box] = Field(min_length=1, max_length=100)
 
 
 class MaskResponse(BaseModel):
     processedImageUrl: str
     message: str
+
+
+class PrivacyProcessRequest(BaseModel):
+    imageId: str = Field(pattern=r"^img_[a-f0-9]{12}$")
+    scope: Literal["high", "all", "custom"] = "high"
+    maskType: Optional[MaskType] = None
+    itemIds: List[str] = Field(default_factory=list, max_length=100)
 
 
 class HistoryRecord(BaseModel):

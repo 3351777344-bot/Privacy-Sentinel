@@ -86,8 +86,10 @@ def findings_from_ocr(
 def _detect_qr_codes(image_path: str, image_width: int, image_height: int, image_id: str) -> list[PrivacyItem]:
     try:
         import cv2
+        import numpy as np
 
-        image = cv2.imread(image_path)
+        image_bytes = np.fromfile(image_path, dtype=np.uint8)
+        image = cv2.imdecode(image_bytes, cv2.IMREAD_COLOR)
         if image is None:
             return []
         detector = cv2.QRCodeDetector()

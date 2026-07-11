@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 
 from config import settings
-from detector.privacy_detector import detect_privacy_items
+from detector.privacy_agent import detect_privacy_items
 from image_processor.blur import apply_blur_mask
 from image_processor.mask import apply_black_mask
 from image_processor.mosaic import apply_mosaic_mask
@@ -34,6 +34,7 @@ from schemas.models import (
     LinkCheckResponse,
     MaskRequest,
     MaskResponse,
+    PrivacyProcessRequest,
     ScamAnalyzeRequest,
     ScamAnalyzeResponse,
     TextFinding,
@@ -45,10 +46,11 @@ BASE_DIR = Path(__file__).resolve().parent
 logger = logging.getLogger("guardianhub")
 UPLOAD_DIR = BASE_DIR / "static" / "uploads"
 PROCESSED_DIR = BASE_DIR / "static" / "processed"
+DETECTION_DIR = BASE_DIR / "data" / "detections"
 HISTORY_FILE = BASE_DIR / "data" / "history.json"
 HISTORY_DATABASE = BASE_DIR / "data" / "guardianhub.db"
 
-for directory in [UPLOAD_DIR, PROCESSED_DIR, HISTORY_DATABASE.parent]:
+for directory in [UPLOAD_DIR, PROCESSED_DIR, DETECTION_DIR, HISTORY_DATABASE.parent]:
     directory.mkdir(parents=True, exist_ok=True)
 history_store = HistoryStore(HISTORY_DATABASE, HISTORY_FILE)
 Image.MAX_IMAGE_PIXELS = settings.max_image_pixels
@@ -91,6 +93,9 @@ def _cleanup_expired_files() -> None:
         for path in directory.iterdir():
             if path.is_file() and path.name != ".gitkeep" and path.stat().st_mtime < cutoff:
                 path.unlink(missing_ok=True)
+    for path in DETECTION_DIR.iterdir():
+        if path.is_file() and path.stat().st_mtime < cutoff:
+            path.unlink(missing_ok=True)
     history_store.delete_expired(settings.retention_hours)
 
 
@@ -99,6 +104,51 @@ def _find_uploaded_image(image_id: str) -> Path:
     if not matches:
         raise HTTPException(status_code=404, detail="未找到对应图片，请先完成检测。")
     return matches[0]
+
+
+def _detection_path(image_id: str) -> Path:
+    return DETECTION_DIR / f"{image_id}.json"
+
+
+def _save_detection_result(result: DetectResponse) -> None:
+    _detection_path(result.imageId).write_text(result.model_dump_json(indent=2), encoding="utf-8")
+
+
+def _load_detection_result(image_id: str) -> DetectResponse:
+    path = _detection_path(image_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Detection result not found. Please scan the image again.")
+    try:
+        return DetectResponse(**json.loads(path.read_text(encoding="utf-8")))
+    except (json.JSONDecodeError, OSError, ValueError):
+        raise HTTPException(status_code=500, detail="Stored detection result is unreadable. Please scan again.")
+
+
+def _valid_mask_type(mask_type: str | None) -> str:
+    if mask_type in {"black", "blur", "mosaic"}:
+        return mask_type
+    if settings.default_mask_type in {"black", "blur", "mosaic"}:
+        return settings.default_mask_type
+    return "mosaic"
+
+
+def _apply_mask(image_id: str, mask_type: str, boxes: list) -> MaskResponse:
+    image_path = _find_uploaded_image(image_id)
+    with Image.open(image_path) as image:
+        if mask_type == "black":
+            output = apply_black_mask(image, boxes)
+        elif mask_type == "blur":
+            output = apply_blur_mask(image, boxes)
+        else:
+            output = apply_mosaic_mask(image, boxes)
+
+    processed_name = f"{image_id}_safe.png"
+    processed_path = PROCESSED_DIR / processed_name
+    output.save(processed_path, format="PNG")
+
+    processed_url = f"/static/processed/{processed_name}"
+    _update_processed_history(image_id, processed_url)
+    return MaskResponse(processedImageUrl=processed_url, message="Local privacy processing completed.")
 
 
 def _level_from_score(score: int) -> str:
@@ -123,7 +173,7 @@ def health() -> dict[str, str]:
     return {
         "status": "ok",
         "message": "GuardianHub backend is running",
-        "privacyDetector": "demo" if settings.demo_mode else "ocr",
+        "privacyDetector": "demo" if settings.demo_mode else settings.privacy_engine,
     }
 
 
@@ -164,6 +214,7 @@ async def detect(file: UploadFile = File(...)) -> DetectResponse:
         logger.exception("Privacy detector failed for image %s", image_id)
         saved_path.unlink(missing_ok=True)
         raise HTTPException(status_code=503, detail="图片检测引擎暂不可用，请稍后重试。")
+    _save_detection_result(result)
     _append_history(
         HistoryRecord(
             module="privacy",
@@ -182,22 +233,25 @@ async def detect(file: UploadFile = File(...)) -> DetectResponse:
 
 @app.post("/api/mask", response_model=MaskResponse)
 def mask_image(request: MaskRequest) -> MaskResponse:
-    image_path = _find_uploaded_image(request.imageId)
-    with Image.open(image_path) as image:
-        if request.maskType == "black":
-            output = apply_black_mask(image, request.items)
-        elif request.maskType == "blur":
-            output = apply_blur_mask(image, request.items)
-        else:
-            output = apply_mosaic_mask(image, request.items)
+    return _apply_mask(request.imageId, request.maskType, request.items)
 
-    processed_name = f"{request.imageId}_safe.png"
-    processed_path = PROCESSED_DIR / processed_name
-    output.save(processed_path, format="PNG")
 
-    processed_url = f"/static/processed/{processed_name}"
-    _update_processed_history(request.imageId, processed_url)
-    return MaskResponse(processedImageUrl=processed_url, message="已完成安全处理。")
+@app.post("/api/privacy/process", response_model=MaskResponse)
+def process_privacy_image(request: PrivacyProcessRequest) -> MaskResponse:
+    detection = _load_detection_result(request.imageId)
+    if request.scope == "all":
+        selected_items = detection.items
+    elif request.scope == "high":
+        selected_items = [item for item in detection.items if item.riskLevel == "high"]
+    else:
+        selected_ids = set(request.itemIds)
+        selected_items = [item for item in detection.items if item.id in selected_ids]
+
+    if not selected_items:
+        raise HTTPException(status_code=400, detail="No privacy areas were selected for processing.")
+
+    mask_type = _valid_mask_type(request.maskType)
+    return _apply_mask(request.imageId, mask_type, [item.box for item in selected_items])
 
 
 @app.get("/api/history", response_model=list[HistoryRecord])
