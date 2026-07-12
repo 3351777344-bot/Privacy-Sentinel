@@ -6,7 +6,12 @@ frontend/vite.config.js
 frontend/vite.config.d.ts
 .env
 backend/**/__pycache__/
+backend/.coverage*
+!backend/.coveragerc
+backend/htmlcov/
 backend/data/*.db*
+backend/data/detections/*
+!backend/data/detections/.gitkeep
 backend/static/uploads/*
 backend/static/processed/*
 !backend/static/uploads/.gitkeep

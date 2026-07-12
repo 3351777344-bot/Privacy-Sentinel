@@ -3,25 +3,17 @@ import {
   analyzeCode,
   checkDoc,
   checkLink,
+  decodeQrImage,
   detectImage,
   fetchHistory,
   processPrivacyImage,
-  saveHistory,
   toAssetUrl
 } from './api/privacyApi';
-import ImagePreview from './components/ImagePreview';
-import MaskControl from './components/MaskControl';
-import PrivacyItemList from './components/PrivacyItemList';
-import RiskSummary from './components/RiskSummary';
-import {
-  EvidenceList,
-  HistoryTimeline,
-  RiskBadge,
-  RiskReport,
-  ScoreCard,
-  SuggestionList
-} from './components/RiskComponents';
-import UploadPanel from './components/UploadPanel';
+import { HistoryTimeline, RiskBadge, ScoreCard } from './components/RiskComponents';
+import CodePage from './pages/CodePage';
+import DocPage from './pages/DocPage';
+import LinkPage from './pages/LinkPage';
+import PrivacyPage from './pages/PrivacyPage';
 import type {
   CodeAnalyzeResponse,
   DetectResult,
@@ -29,9 +21,9 @@ import type {
   HistoryRecord,
   LinkCheckResponse,
   MaskType,
-  RiskLevel,
-  TextFinding
+  RiskLevel
 } from './types/privacy';
+import { calculateOverallScore } from './utils/scoring';
 
 type Page = 'home' | 'privacy' | 'code' | 'link' | 'doc';
 type ToolPage = Exclude<Page, 'home'>;
@@ -47,7 +39,7 @@ const modules: Array<{
     id: 'privacy',
     title: 'Privacy Sentinel 隐私哨兵',
     subtitle: '图片隐私检测与打码',
-    detail: '识别手机号、地址、二维码、头像、昵称等敏感区域，生成安全分享版本。',
+    detail: '识别手机号、证件号、银行卡号、邮箱、地址和二维码等敏感区域，生成安全分享版本。',
     accent: 'blue'
   },
   {
@@ -84,65 +76,10 @@ print("token", api_key)`;
 const sampleDocRequirement =
   '课程论文提交要求：请于 2026 年 7 月 10 日 18:00 前提交 PDF 文件，命名规则为 学号-姓名-课程论文。材料需包含封面、摘要、正文、参考文献；正文不少于 3000 字。';
 
-const languageOptions = [
-  { value: 'auto', label: '自动识别' },
-  { value: 'python', label: 'Python' },
-  { value: 'java', label: 'Java' },
-  { value: 'javascript', label: 'JavaScript' },
-  { value: 'typescript', label: 'TypeScript' },
-  { value: 'sql', label: 'SQL' },
-  { value: 'other', label: 'Other' }
-];
-
-const sourceOptions = ['短信', '群聊', '邮件', '二维码', '二手交易', '客服', '学校通知', '陌生人私信', '其他'];
-
 function scoreFromRisk(level: RiskLevel) {
   if (level === 'high') return 48;
   if (level === 'medium') return 74;
   return 92;
-}
-
-function privacyScore(result?: DetectResult | null) {
-  return result?.score;
-}
-
-function overallScore(records: HistoryRecord[], latestScores: Array<number | undefined>) {
-  const activeScores = latestScores.filter((score): score is number => typeof score === 'number');
-  const persistedScores = ['privacy', 'code', 'link', 'doc']
-    .map((module) => records.find((record) => (record.module ?? 'privacy') === module)?.score)
-    .filter((score): score is number => typeof score === 'number');
-  const scores = activeScores.length ? activeScores : persistedScores;
-  return scores.length ? Math.round(scores.reduce((total, score) => total + score, 0) / scores.length) : 96;
-}
-
-function evidenceFromPrivacy(result?: DetectResult | null): TextFinding[] {
-  return (
-    result?.items.map((item) => ({
-      label: item.label,
-      evidence: `${item.text}：${item.suggestion}`,
-      riskLevel: item.riskLevel
-    })) ?? []
-  );
-}
-
-function evidenceFromCode(result?: CodeAnalyzeResponse | null): TextFinding[] {
-  return (
-    result?.vulnerabilities.map((item) => ({
-      label: item.line ? `${item.title} / 第 ${item.line} 行` : item.title,
-      evidence: `${item.snippet || '未截取到代码片段'}。${item.reason}`,
-      riskLevel: item.riskLevel
-    })) ?? []
-  );
-}
-
-function evidenceFromLink(result?: LinkCheckResponse | null): TextFinding[] {
-  return (
-    result?.checks.map((item) => ({
-      label: `${item.label} / ${item.status}`,
-      evidence: item.message,
-      riskLevel: item.riskLevel
-    })) ?? []
-  );
 }
 
 export default function App() {
@@ -164,6 +101,8 @@ export default function App() {
   const [url, setUrl] = useState('https://example.com/login?redirect=pay&token=abc123abc123abc123abc123');
   const [linkSource, setLinkSource] = useState('短信');
   const [qrFile, setQrFile] = useState<File | null>(null);
+  const [qrMessage, setQrMessage] = useState('');
+  const [loadingQr, setLoadingQr] = useState(false);
   const [linkResult, setLinkResult] = useState<LinkCheckResponse | null>(null);
   const [loadingLink, setLoadingLink] = useState(false);
 
@@ -187,12 +126,12 @@ export default function App() {
   const mergedHistory = history;
   const score = useMemo(
     () =>
-      overallScore(mergedHistory, [
-        privacyScore(detectResult),
-        codeResult?.score,
-        linkResult?.score,
-        docResult?.score
-      ]),
+      calculateOverallScore(mergedHistory, {
+        privacy: detectResult?.score,
+        code: codeResult?.score,
+        link: linkResult?.score,
+        doc: docResult?.score
+      }),
     [detectResult, docResult, linkResult, mergedHistory, codeResult]
   );
 
@@ -205,7 +144,7 @@ export default function App() {
     return {
       privacy: {
         riskLevel: detectResult?.riskLevel ?? latestPrivacy?.riskLevel ?? ('low' as RiskLevel),
-        score: privacyScore(detectResult) ?? latestPrivacy?.score ?? (latestPrivacy ? scoreFromRisk(latestPrivacy.riskLevel) : 92),
+        score: detectResult?.score ?? latestPrivacy?.score ?? (latestPrivacy ? scoreFromRisk(latestPrivacy.riskLevel) : 92),
         status: detectResult ? detectResult.summary : latestPrivacy?.summary ?? '等待图片检测'
       },
       code: {
@@ -266,7 +205,6 @@ export default function App() {
     try {
       const result = await analyzeCode(codeLanguage, codeText, codeFile);
       setCodeResult(result);
-      await saveHistory('code', result.riskLevel, result.score, result.summary);
       await refreshHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : '代码安全检测失败，请稍后重试。');
@@ -281,12 +219,29 @@ export default function App() {
     try {
       const result = await checkLink(url, linkSource);
       setLinkResult(result);
-      await saveHistory('link', result.riskLevel, result.score, result.summary);
       await refreshHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : '链接安全体检失败，请稍后重试。');
     } finally {
       setLoadingLink(false);
+    }
+  }
+
+  async function handleQrUpload(file: File | null) {
+    setQrFile(file);
+    setQrMessage('');
+    if (!file) return;
+    setLoadingQr(true);
+    setError('');
+    try {
+      const result = await decodeQrImage(file);
+      setUrl(result.primaryText);
+      setLinkSource('二维码');
+      setQrMessage(result.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '二维码解析失败，请换一张更清晰的图片。');
+    } finally {
+      setLoadingQr(false);
     }
   }
 
@@ -296,7 +251,6 @@ export default function App() {
     try {
       const result = await checkDoc(docRequirement, docFiles);
       setDocResult(result);
-      await saveHistory('doc', result.riskLevel, result.score, result.summary);
       await refreshHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : '材料检查失败，请稍后重试。');
@@ -407,420 +361,63 @@ export default function App() {
       )}
 
       {page === 'privacy' && (
-        <>
-          <PageHero
-            eyebrow="Privacy Sentinel"
-            title="Privacy Sentinel 隐私哨兵"
-            copy="图片分享前先识别敏感区域并打码，保留原有上传、检测、标注、处理和历史记录能力。"
-            onBack={() => setPage('home')}
-          />
-          <div className="workflow-grid">
-            <div className="left-column">
-              <UploadPanel loading={loadingDetect} onDetect={handleDetect} />
-              <ImagePreview
-                imageUrl={toAssetUrl(detectResult?.originalImageUrl)}
-                items={detectResult?.items}
-                title="原图与隐私检测框"
-                emptyText="上传图片后，这里会展示原图和标注出的隐私检测框。"
-              />
-            </div>
-            <div className="right-column">
-              <RiskSummary result={detectResult} />
-              <PrivacyItemList items={detectResult?.items ?? []} />
-              <MaskControl
-                disabled={!detectResult}
-                loading={loadingMask}
-                maskType={maskType}
-                items={detectResult?.items ?? []}
-                onMaskTypeChange={setMaskType}
-                onProcess={handleMask}
-              />
-            </div>
-          </div>
-
-          <div className="bottom-grid">
-            <section className="card safe-preview">
-              <div className="section-title">
-                <span>06</span>
-                <div>
-                  <h3>原图 / 处理后对比</h3>
-                  <p>打码完成后对照检查，确认无误再对外分享。</p>
-                </div>
-              </div>
-              {processedUrl && detectResult ? (
-                <div className="comparison-grid">
-                  <ImageCompareCard title="原图" imageUrl={toAssetUrl(detectResult.originalImageUrl)} />
-                  <ImageCompareCard title="处理后" imageUrl={processedUrl} />
-                </div>
-              ) : (
-                <div className="safe-empty">
-                  <strong>等待打码处理</strong>
-                  <p className="muted">完成检测并选择处理策略后，这里会展示原图与安全版本对比。</p>
-                </div>
-              )}
-            </section>
-            <RiskReport
-              title="分享前风险报告"
-              riskLevel={detectResult?.riskLevel}
-              score={privacyScore(detectResult)}
-              summary={detectResult?.summary}
-              evidence={evidenceFromPrivacy(detectResult)}
-              suggestions={[
-                '优先处理高风险区域，再复核中风险区域是否与分享目的有关。',
-                '如果图片包含二维码、证件、住址或联系方式，建议处理后再分享。',
-                '正式发布前查看处理后预览，避免误遮挡重要内容或遗漏隐私。'
-              ]}
-            />
-          </div>
-        </>
+        <PrivacyPage
+          result={detectResult}
+          processedUrl={processedUrl}
+          loadingDetect={loadingDetect}
+          loadingMask={loadingMask}
+          maskType={maskType}
+          onBack={() => setPage('home')}
+          onDetect={handleDetect}
+          onMaskTypeChange={setMaskType}
+          onProcess={handleMask}
+        />
       )}
 
       {page === 'code' && (
-        <>
-          <PageHero
-            eyebrow="Code Guardian"
-            title="Code Guardian 代码卫士"
-            copy="提交代码之前，先检查潜在安全风险。"
-            onBack={() => setPage('home')}
-          />
-          <div className="tool-grid">
-            <section className="card form-card">
-              <div className="section-title">
-                <span>01</span>
-                <div>
-                  <h3>代码输入区</h3>
-                  <p>粘贴代码或上传单个代码文件，当前不强制支持 zip 项目扫描。</p>
-                </div>
-              </div>
-              <label className="field-label">
-                代码语言
-                <select value={codeLanguage} onChange={(event) => setCodeLanguage(event.target.value)}>
-                  {languageOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {codeResult && (
-                <p className="muted">
-                  识别语言：{codeResult.language}（来源：{codeResult.languageSource}，置信度：
-                  {Math.round(codeResult.languageConfidence * 100)}%）
-                </p>
-              )}
-              <textarea value={codeText} onChange={(event) => setCodeText(event.target.value)} />
-              <label className="upload-box doc-upload-box">
-                <input
-                  type="file"
-                  accept=".py,.java,.js,.ts,.sql,.txt,.zip"
-                  onChange={(event) => setCodeFile(event.target.files?.[0] ?? null)}
-                />
-                <span className="upload-icon">+</span>
-                <strong>{codeFile ? codeFile.name : '选择单个代码文件'}</strong>
-                <span>.py / .java / .js / .ts / .sql / .txt；zip 为后续扩展功能</span>
-              </label>
-              {codeFile?.name.toLowerCase().endsWith('.zip') && (
-                <p className="muted">当前版本暂不解析 zip 项目包，请上传单个代码文件或直接粘贴核心代码片段。</p>
-              )}
-              <button
-                className="primary-button"
-                disabled={loadingCode || (!codeText.trim() && !codeFile)}
-                onClick={handleCodeAnalyze}
-              >
-                {loadingCode ? '检测中...' : '开始代码安全检测'}
-              </button>
-            </section>
-            <div className="report-stack">
-              <RiskReport
-                title="代码安全体检报告"
-                riskLevel={codeResult?.riskLevel}
-                score={codeResult?.score}
-                summary={codeResult?.summary}
-                evidence={evidenceFromCode(codeResult)}
-                suggestions={codeResult?.suggestions}
-              />
-              {codeResult && (
-                <DecisionCard
-                  title="是否建议直接提交代码"
-                  ok={codeResult.shouldSubmit}
-                  positive="可以提交"
-                  negative={codeResult.riskLevel === 'high' ? '不建议提交' : '建议修复后提交'}
-                />
-              )}
-            </div>
-          </div>
-        </>
+        <CodePage
+          text={codeText}
+          language={codeLanguage}
+          file={codeFile}
+          result={codeResult}
+          loading={loadingCode}
+          onBack={() => setPage('home')}
+          onTextChange={setCodeText}
+          onLanguageChange={setCodeLanguage}
+          onFileChange={setCodeFile}
+          onAnalyze={handleCodeAnalyze}
+        />
       )}
 
       {page === 'link' && (
-        <>
-          <PageHero
-            eyebrow="Link Guard"
-            title="Link Guard 链接卫士"
-            copy="打开链接之前，先做一次安全体检。"
-            onBack={() => setPage('home')}
-          />
-          <div className="tool-grid">
-            <section className="card form-card">
-              <div className="section-title">
-                <span>01</span>
-                <div>
-                  <h3>链接安全体检</h3>
-                  <p>输入 URL、短链接、二维码解析出的内容或链接来源说明。</p>
-                </div>
-              </div>
-              <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com" />
-              <label className="field-label">
-                链接来源
-                <select value={linkSource} onChange={(event) => setLinkSource(event.target.value)}>
-                  {sourceOptions.map((source) => (
-                    <option key={source} value={source}>
-                      {source}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="upload-box doc-upload-box">
-                <input type="file" accept="image/*" onChange={(event) => setQrFile(event.target.files?.[0] ?? null)} />
-                <span className="upload-icon">+</span>
-                <strong>{qrFile ? qrFile.name : '二维码图片占位上传'}</strong>
-                <span>当前版本暂不解析二维码图片，请手动输入二维码解析出的链接。</span>
-              </label>
-              <button className="primary-button" disabled={loadingLink || !url.trim()} onClick={handleLinkCheck}>
-                {loadingLink ? '体检中...' : '开始链接安全体检'}
-              </button>
-            </section>
-            <div className="report-stack">
-              <RiskReport
-                title="链接安全体检报告"
-                riskLevel={linkResult?.riskLevel}
-                score={linkResult?.score}
-                summary={linkResult?.summary}
-                evidence={evidenceFromLink(linkResult)}
-                suggestions={linkResult?.suggestions}
-              />
-              {linkResult && (
-                <>
-                  <section className="card detail-card">
-                    <div className="section-title">
-                      <span>P</span>
-                      <div>
-                        <h3>可疑参数与来源风险</h3>
-                        <p>{linkResult.normalizedUrl}</p>
-                      </div>
-                    </div>
-                    <EvidenceList
-                      evidence={[
-                        ...linkResult.suspiciousParams.map((item) => ({
-                          label: item.name,
-                          evidence: item.reason,
-                          riskLevel: item.riskLevel
-                        })),
-                        {
-                          label: `来源场景：${linkResult.sourceRisk.source}`,
-                          evidence: linkResult.sourceRisk.reason,
-                          riskLevel: linkResult.sourceRisk.riskLevel
-                        }
-                      ]}
-                    />
-                  </section>
-                  <DecisionCard title="是否建议打开链接" ok={linkResult.shouldOpen} positive="可以谨慎打开" negative="不建议直接打开" />
-                </>
-              )}
-            </div>
-          </div>
-        </>
+        <LinkPage
+          url={url}
+          source={linkSource}
+          qrFile={qrFile}
+          qrMessage={qrMessage}
+          result={linkResult}
+          loading={loadingLink}
+          loadingQr={loadingQr}
+          onBack={() => setPage('home')}
+          onUrlChange={setUrl}
+          onSourceChange={setLinkSource}
+          onQrUpload={handleQrUpload}
+          onCheck={handleLinkCheck}
+        />
       )}
 
       {page === 'doc' && (
-        <>
-          <PageHero
-            eyebrow="Doc Shield"
-            title="Doc Shield 提交护盾"
-            copy="按“输入提交要求 + 上传材料 + 生成提交检查报告”的流程，检查材料完整性、格式规范、隐私风险、提交建议和安全评分。"
-            onBack={() => setPage('home')}
-          />
-          <div className="tool-grid doc-tool-grid">
-            <section className="card form-card doc-form-card">
-              <div className="section-title">
-                <span>01</span>
-                <div>
-                  <h3>提交要求与材料上传</h3>
-                  <p>支持 txt、md、pdf、docx 内容解析；图片和压缩包会先检查文件名、后缀和上传状态。</p>
-                </div>
-              </div>
-              <textarea
-                value={docRequirement}
-                onChange={(event) => setDocRequirement(event.target.value)}
-                placeholder="粘贴课程论文、比赛材料、报名附件等提交要求"
-              />
-              <label className="upload-box doc-upload-box">
-                <input
-                  multiple
-                  type="file"
-                  accept=".txt,.md,.pdf,.docx,.png,.jpg,.jpeg,.zip"
-                  onChange={(event) => setDocFiles(Array.from(event.target.files ?? []))}
-                />
-                <span className="upload-icon">+</span>
-                <strong>{docFiles.length ? `已选择 ${docFiles.length} 个文件` : '选择或拖入多个材料文件'}</strong>
-                <span>PDF / DOCX / TXT / MD / PNG / JPG / ZIP</span>
-              </label>
-              {docFiles.length > 0 && (
-                <div className="file-chip-list">
-                  {docFiles.map((file) => (
-                    <span key={`${file.name}-${file.size}`}>{file.name}</span>
-                  ))}
-                </div>
-              )}
-              <div className="capability-list">
-                <span>要求解析</span>
-                <span>完整性检查</span>
-                <span>格式规范</span>
-                <span>隐私风险</span>
-              </div>
-              <button
-                className="primary-button"
-                disabled={loadingDoc || !docRequirement.trim() || docFiles.length === 0}
-                onClick={handleDocCheck}
-              >
-                {loadingDoc ? '检查中...' : '生成提交检查报告'}
-              </button>
-            </section>
-            <DocReportPanel result={docResult} />
-          </div>
-        </>
+        <DocPage
+          requirement={docRequirement}
+          files={docFiles}
+          result={docResult}
+          loading={loadingDoc}
+          onBack={() => setPage('home')}
+          onRequirementChange={setDocRequirement}
+          onFilesChange={setDocFiles}
+          onCheck={handleDocCheck}
+        />
       )}
     </main>
-  );
-}
-
-function PageHero({
-  eyebrow,
-  title,
-  copy,
-  onBack
-}: {
-  eyebrow: string;
-  title: string;
-  copy: string;
-  onBack: () => void;
-}) {
-  return (
-    <header className="page-hero">
-      <div>
-        <p className="eyebrow">{eyebrow}</p>
-        <h1>{title}</h1>
-        <p>{copy}</p>
-      </div>
-      <button onClick={onBack}>返回安全中心</button>
-    </header>
-  );
-}
-
-function ImageCompareCard({ title, imageUrl }: { title: string; imageUrl: string }) {
-  return (
-    <div className="compare-card">
-      <strong>{title}</strong>
-      <img src={imageUrl} alt={title} />
-    </div>
-  );
-}
-
-function DecisionCard({
-  title,
-  ok,
-  positive,
-  negative
-}: {
-  title: string;
-  ok: boolean;
-  positive: string;
-  negative: string;
-}) {
-  return (
-    <section className={`card decision-card ${ok ? 'low' : 'high'}`}>
-      <strong>{title}</strong>
-      <RiskBadge level={ok ? 'low' : 'high'} compact />
-      <p>{ok ? positive : negative}</p>
-    </section>
-  );
-}
-
-function DocReportPanel({ result }: { result: DocCheckResponse | null }) {
-  if (!result) {
-    return (
-      <RiskReport
-        title="提交检查报告"
-        emptyText="上传材料并开始检查后，这里会展示要求解析、材料完整性、格式规范、隐私风险、提交建议和安全评分。"
-      />
-    );
-  }
-
-  const groups = {
-    completeness: result.checks.filter((item) => item.category === 'completeness'),
-    format: result.checks.filter((item) => item.category === 'format'),
-    privacy: result.checks.filter((item) => item.category === 'privacy')
-  };
-
-  return (
-    <section className="card result-card doc-report">
-      <div className="section-title">
-        <span>R</span>
-        <div>
-          <h3>提交检查报告</h3>
-          <p>{result.summary}</p>
-        </div>
-      </div>
-      <div className={`risk-banner ${result.riskLevel}`}>
-        <RiskBadge level={result.riskLevel} />
-        <span>提交安全评分</span>
-        <b>{result.score} / 100</b>
-      </div>
-
-      <div className="parsed-requirements">
-        <h4>解析出的提交要求</h4>
-        <RequirementItem label="文件格式" value={result.parsedRequirements.formats.join('、') || '未明确'} />
-        <RequirementItem label="命名规则" value={result.parsedRequirements.namingRule || '未明确'} />
-        <RequirementItem label="必需材料" value={result.parsedRequirements.requiredMaterials.join('、') || '未明确'} />
-        <RequirementItem label="字数/页数" value={result.parsedRequirements.lengthRequirement || '未明确'} />
-        <RequirementItem label="截止时间" value={result.parsedRequirements.deadline || '未明确'} />
-      </div>
-
-      <DocCheckGroup title="材料完整性" items={groups.completeness} />
-      <DocCheckGroup title="格式规范" items={groups.format} />
-      <DocCheckGroup title="隐私风险" items={groups.privacy} />
-
-      <div className="uploaded-files">
-        <h4>已上传材料</h4>
-        {result.files.map((file) => (
-          <div key={file.fileName}>
-            <strong>{file.fileName}</strong>
-            <span>
-              .{file.extension || '无后缀'} / {file.status} / {file.wordCount} 字
-            </span>
-          </div>
-        ))}
-      </div>
-
-      <SuggestionList suggestions={result.suggestions} />
-    </section>
-  );
-}
-
-function RequirementItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function DocCheckGroup({ title, items }: { title: string; items: DocCheckResponse['checks'] }) {
-  return (
-    <div className="doc-check-group">
-      <h4>{title}</h4>
-      <EvidenceList evidence={items} />
-    </div>
   );
 }

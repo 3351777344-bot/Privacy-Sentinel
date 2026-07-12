@@ -35,11 +35,19 @@ npm install
 npm run dev
 ```
 
+前端构建工具要求 Node.js 22.12 或更高版本。
+
 ```bash
 cd backend
 python -m pip install -r requirements-dev.txt
 python -m pytest
+
+cd ../frontend
+npm test
+npm run build
 ```
+
+前端页面位于 `frontend/src/pages/`，`App.tsx` 只负责全局状态、导航和 API 流程编排；通用报告和页面组件位于 `frontend/src/components/`。
 
 默认前端地址为 `http://127.0.0.1:5173`，后端地址为 `http://127.0.0.1:8000`。
 

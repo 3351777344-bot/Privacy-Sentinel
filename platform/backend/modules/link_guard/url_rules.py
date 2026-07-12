@@ -33,6 +33,25 @@ def _has_random_token(text: str) -> bool:
     return bool(re.search(r"(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9_\-]{24,}", text))
 
 
+def _is_valid_host(host: str) -> bool:
+    if not host or any(char.isspace() for char in host):
+        return False
+    if _is_ip(host):
+        return True
+    try:
+        ascii_host = host.encode("idna").decode("ascii").rstrip(".")
+    except UnicodeError:
+        return False
+    labels = ascii_host.split(".")
+    return all(
+        0 < len(label) <= 63
+        and not label.startswith("-")
+        and not label.endswith("-")
+        and re.fullmatch(r"[A-Za-z0-9-]+", label) is not None
+        for label in labels
+    )
+
+
 def run_url_rules(normalized_url: str) -> tuple[list[dict], list[dict]]:
     parsed = urlparse(normalized_url)
     host = (parsed.hostname or "").lower()
@@ -44,6 +63,8 @@ def run_url_rules(normalized_url: str) -> tuple[list[dict], list[dict]]:
         checks.append(_check("link_000", "协议合法性", "fail", "high", "仅允许检查和打开 HTTP/HTTPS 链接。"))
     if not host:
         checks.append(_check("link_000_host", "域名检查", "fail", "high", "链接缺少有效域名。"))
+    elif not _is_valid_host(host):
+        checks.append(_check("link_000_host_format", "域名格式", "fail", "high", "链接域名格式不合法。"))
     if parsed.username or parsed.password:
         checks.append(_check("link_000_auth", "URL 身份信息", "fail", "high", "链接在域名前包含用户名或密码，可能用于隐藏真实域名。"))
 

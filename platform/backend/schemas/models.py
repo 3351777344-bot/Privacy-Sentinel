@@ -124,8 +124,8 @@ class ScamAnalyzeResponse(BaseModel):
 
 
 class LinkCheckRequest(BaseModel):
-    url: str
-    source: Optional[str] = "其他"
+    url: str = Field(min_length=1, max_length=4096)
+    source: Optional[str] = Field(default="其他", max_length=100)
 
 
 class LinkCheckItem(BaseModel):
@@ -158,6 +158,12 @@ class LinkCheckResponse(BaseModel):
     sourceRisk: SourceRisk
     suggestions: List[str]
     shouldOpen: bool
+
+
+class QrDecodeResponse(BaseModel):
+    decodedTexts: List[str]
+    primaryText: str
+    message: str
 
 
 class ParsedRequirements(BaseModel):

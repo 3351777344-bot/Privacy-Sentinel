@@ -16,6 +16,16 @@ BAD_NAME_PATTERNS = [
     r"^文档\d*$",
 ]
 
+FORMAT_EXTENSION_GROUPS = {
+    "docx": {"doc", "docx"},
+    "ppt": {"ppt", "pptx"},
+    "zip": {"zip", "rar"},
+}
+
+
+def _accepted_extensions(required_format: str) -> set[str]:
+    return FORMAT_EXTENSION_GROUPS.get(required_format, {required_format})
+
 
 def _check_naming_rule(file_name: str, naming_rule: str | None) -> tuple[bool, list[str]]:
     if not naming_rule:
@@ -42,7 +52,8 @@ def check_format(files: list[ExtractedFile], parsed_requirements: dict[str, Any]
 
     if required_formats:
         for required_format in required_formats:
-            matched = [file.fileName for file in files if file.extension.lower() == required_format]
+            accepted = _accepted_extensions(required_format)
+            matched = [file.fileName for file in files if file.extension.lower() in accepted]
             if matched:
                 checks.append(
                     {
@@ -65,7 +76,8 @@ def check_format(files: list[ExtractedFile], parsed_requirements: dict[str, Any]
                 )
 
     for file in files:
-        if required_formats and file.extension.lower() not in required_formats:
+        accepted_extensions = set().union(*(_accepted_extensions(item) for item in required_formats)) if required_formats else set()
+        if required_formats and file.extension.lower() not in accepted_extensions:
             checks.append(
                 {
                     "category": "format",

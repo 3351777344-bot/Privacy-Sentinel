@@ -6,7 +6,8 @@ import type {
   HistoryRecord,
   LinkCheckResponse,
   MaskResponse,
-  MaskType
+  MaskType,
+  QrDecodeResponse
 } from '../types/privacy';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
@@ -103,6 +104,16 @@ export async function checkLink(url: string, source: string): Promise<LinkCheckR
     body: JSON.stringify({ url, source })
   });
   return parseResponse<LinkCheckResponse>(response);
+}
+
+export async function decodeQrImage(file: File): Promise<QrDecodeResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await fetch(`${API_BASE_URL}/api/link/qr/decode`, {
+    method: 'POST',
+    body: formData
+  });
+  return parseResponse<QrDecodeResponse>(response);
 }
 
 export async function checkDoc(requirementText: string, files: File[]): Promise<DocCheckResponse> {

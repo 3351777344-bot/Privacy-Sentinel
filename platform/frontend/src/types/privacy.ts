@@ -111,6 +111,12 @@ export interface LinkCheckResponse {
   shouldOpen: boolean;
 }
 
+export interface QrDecodeResponse {
+  decodedTexts: string[];
+  primaryText: string;
+  message: string;
+}
+
 export interface DocCheckResponse {
   riskLevel: RiskLevel;
   score: number;

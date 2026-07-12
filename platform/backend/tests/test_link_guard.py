@@ -17,3 +17,9 @@ def test_private_ip_is_high_risk() -> None:
     labels = {item["label"] for item in result["checks"]}
     assert "内网地址" in labels
     assert result["riskLevel"] == "high"
+
+
+def test_invalid_hostname_is_high_risk() -> None:
+    result = analyze_link("https://bad host.example/path", "其他")
+    assert any(item["id"] == "link_000_host_format" for item in result["checks"])
+    assert result["riskLevel"] == "high"

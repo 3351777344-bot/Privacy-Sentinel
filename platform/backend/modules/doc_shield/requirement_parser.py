@@ -77,14 +77,14 @@ def parse_requirement(requirement_text: str) -> dict[str, Any]:
 
     deadline = None
     deadline_patterns = [
-        r"(?:截止|截至|提交时间|截止时间|deadline)\s*[:：为是]?\s*([0-9]{4}[年/-][0-9]{1,2}[月/-][0-9]{1,2}[日号]?(?:\s*[0-9]{1,2}[:：][0-9]{2})?)",
-        r"([0-9]{4}[年/-][0-9]{1,2}[月/-][0-9]{1,2}[日号]?(?:\s*[0-9]{1,2}[:：][0-9]{2})?\s*(?:前|之前)?)",
-        r"([0-9]{1,2}月[0-9]{1,2}[日号](?:\s*[0-9]{1,2}[:：][0-9]{2})?(?:前|之前)?)",
+        r"(?:截止|截至|提交时间|截止时间|deadline)\s*[:：为是]?\s*([0-9]{4}\s*[年/-]\s*[0-9]{1,2}\s*[月/-]\s*[0-9]{1,2}\s*[日号]?(?:\s*[0-9]{1,2}\s*[:：]\s*[0-9]{2})?)",
+        r"([0-9]{4}\s*[年/-]\s*[0-9]{1,2}\s*[月/-]\s*[0-9]{1,2}\s*[日号]?(?:\s*[0-9]{1,2}\s*[:：]\s*[0-9]{2})?\s*(?:前|之前)?)",
+        r"([0-9]{1,2}\s*月\s*[0-9]{1,2}\s*[日号](?:\s*[0-9]{1,2}\s*[:：]\s*[0-9]{2})?(?:前|之前)?)",
     ]
     for pattern in deadline_patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
-            deadline = match.group(1).strip()
+            deadline = re.sub(r"\s+", "", match.group(1).strip()).removesuffix("之前").removesuffix("前")
             break
 
     return {

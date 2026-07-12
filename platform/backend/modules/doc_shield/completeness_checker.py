@@ -1,3 +1,5 @@
+import re
+from datetime import datetime
 from typing import Any
 
 from .file_extractor import ExtractedFile
@@ -19,6 +21,95 @@ MATERIAL_SYNONYMS = {
 }
 
 
+def _check_length(files: list[ExtractedFile], requirement: str | None) -> list[dict[str, Any]]:
+    if not requirement:
+        return []
+    match = re.search(r"(\d{1,5})(?:[-~至到](\d{1,5}))?(字|页|word|words|page|pages)", requirement, re.IGNORECASE)
+    if not match:
+        return []
+
+    minimum = int(match.group(1))
+    maximum = int(match.group(2)) if match.group(2) else None
+    unit = match.group(3).lower()
+    is_pages = unit in {"页", "page", "pages"}
+    actual = sum((file.pageCount or 0) for file in files) if is_pages else sum(file.wordCount for file in files)
+    unit_label = "页" if is_pages else "字"
+
+    if actual < minimum:
+        return [{
+            "category": "completeness",
+            "label": f"{unit_label}数未达到要求",
+            "evidence": f"要求 {requirement}，当前可解析内容共 {actual} {unit_label}。",
+            "riskLevel": "high",
+            "status": "fail",
+        }]
+    if maximum is not None and actual > maximum:
+        return [{
+            "category": "completeness",
+            "label": f"{unit_label}数超过要求范围",
+            "evidence": f"要求 {requirement}，当前可解析内容共 {actual} {unit_label}。",
+            "riskLevel": "medium",
+            "status": "warning",
+        }]
+    return [{
+        "category": "completeness",
+        "label": f"{unit_label}数符合要求",
+        "evidence": f"要求 {requirement}，当前可解析内容共 {actual} {unit_label}。",
+        "riskLevel": "low",
+        "status": "pass",
+    }]
+
+
+def _parse_deadline(value: str) -> datetime | None:
+    normalized = value.replace("：", ":").removesuffix("之前").removesuffix("前")
+    current_year = datetime.now().year
+    formats = (
+        ("%Y年%m月%d日%H:%M", normalized),
+        ("%Y年%m月%d号%H:%M", normalized),
+        ("%Y-%m-%d%H:%M", normalized),
+        ("%Y/%m/%d%H:%M", normalized),
+        ("%Y年%m月%d日", normalized),
+        ("%Y年%m月%d号", normalized),
+        ("%Y-%m-%d", normalized),
+        ("%Y/%m/%d", normalized),
+        ("%Y年%m月%d日%H:%M", f"{current_year}年{normalized}"),
+        ("%Y年%m月%d号%H:%M", f"{current_year}年{normalized}"),
+        ("%Y年%m月%d日", f"{current_year}年{normalized}"),
+        ("%Y年%m月%d号", f"{current_year}年{normalized}"),
+    )
+    for date_format, candidate in formats:
+        try:
+            parsed = datetime.strptime(candidate, date_format)
+            if "%H" not in date_format:
+                parsed = parsed.replace(hour=23, minute=59, second=59)
+            return parsed
+        except ValueError:
+            continue
+    return None
+
+
+def _check_deadline(value: str | None) -> list[dict[str, Any]]:
+    if not value:
+        return []
+    deadline = _parse_deadline(value)
+    if deadline is None:
+        return [{
+            "category": "completeness",
+            "label": "截止时间需要人工确认",
+            "evidence": f"已识别截止时间“{value}”，但无法转换为明确日期。",
+            "riskLevel": "medium",
+            "status": "warning",
+        }]
+    expired = datetime.now() > deadline
+    return [{
+        "category": "completeness",
+        "label": "提交截止时间已过" if expired else "仍在提交期限内",
+        "evidence": f"识别到截止时间：{deadline.strftime('%Y-%m-%d %H:%M')}。",
+        "riskLevel": "high" if expired else "low",
+        "status": "fail" if expired else "pass",
+    }]
+
+
 def check_completeness(files: list[ExtractedFile], parsed_requirements: dict[str, Any]) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     required_materials = parsed_requirements.get("requiredMaterials", [])
@@ -35,6 +126,8 @@ def check_completeness(files: list[ExtractedFile], parsed_requirements: dict[str
                 "status": "pass",
             }
         )
+        checks.extend(_check_length(files, parsed_requirements.get("lengthRequirement")))
+        checks.extend(_check_deadline(parsed_requirements.get("deadline")))
         return checks
 
     for material in required_materials:
@@ -63,4 +156,6 @@ def check_completeness(files: list[ExtractedFile], parsed_requirements: dict[str
                 }
             )
 
+    checks.extend(_check_length(files, parsed_requirements.get("lengthRequirement")))
+    checks.extend(_check_deadline(parsed_requirements.get("deadline")))
     return checks

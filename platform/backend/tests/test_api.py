@@ -2,6 +2,7 @@ from io import BytesIO
 
 from fastapi.testclient import TestClient
 from PIL import Image
+import pytest
 
 import main
 from modules.risk_scoring import calculate_security_score
@@ -12,16 +13,74 @@ from storage.history_store import HistoryStore
 client = TestClient(main.app)
 
 
+@pytest.fixture(autouse=True)
+def isolate_runtime_storage(tmp_path, monkeypatch):
+    uploads = tmp_path / "runtime_uploads"
+    processed = tmp_path / "runtime_processed"
+    detections = tmp_path / "runtime_detections"
+    uploads.mkdir()
+    processed.mkdir()
+    detections.mkdir()
+    monkeypatch.setattr(main, "UPLOAD_DIR", uploads)
+    monkeypatch.setattr(main, "PROCESSED_DIR", processed)
+    monkeypatch.setattr(main, "DETECTION_DIR", detections)
+    monkeypatch.setattr(main, "history_store", HistoryStore(tmp_path / "runtime_history.db"))
+
+
 def test_health_and_code_auto_detection() -> None:
     assert client.get("/api/health").status_code == 200
     response = client.post("/api/code/analyze", json={"language": "auto", "code": "def hello():\n    return True"})
     assert response.status_code == 200
     assert response.json()["language"] == "python"
+    assert main.history_store.list()[0]["module"] == "code"
+
+
+def test_qr_image_can_be_decoded_locally() -> None:
+    import cv2
+
+    params = cv2.QRCodeEncoder_Params()
+    params.version = 3
+    qr = cv2.QRCodeEncoder_create(params).encode("https://example.com/safe")
+    buffer = BytesIO()
+    Image.fromarray(qr).save(buffer, format="PNG")
+    response = client.post("/api/link/qr/decode", files={"file": ("qr.png", buffer.getvalue(), "image/png")})
+    assert response.status_code == 200
+    assert response.json()["primaryText"] == "https://example.com/safe"
 
 
 def test_invalid_image_is_rejected() -> None:
     response = client.post("/api/detect", files={"file": ("fake.png", b"not an image", "image/png")})
     assert response.status_code == 400
+
+
+def test_malformed_url_returns_client_error() -> None:
+    response = client.post("/api/link/check", json={"url": "http://[broken", "source": "其他"})
+    assert response.status_code == 400
+    assert main.history_store.list() == []
+
+
+def test_link_analysis_persists_history_on_backend() -> None:
+    response = client.post("/api/link/check", json={"url": "https://example.com", "source": "其他"})
+    assert response.status_code == 200
+    assert main.history_store.list()[0]["module"] == "link"
+
+
+def test_doc_check_validates_content_and_persists_history() -> None:
+    response = client.post(
+        "/api/doc/check",
+        data={"requirement_text": "请在2099年12月31日前提交 TXT 报告，正文至少 5 字。"},
+        files=[("files", ("课程报告.txt", "这是正文测试内容".encode(), "text/plain"))],
+    )
+    assert response.status_code == 200
+    assert response.json()["parsedRequirements"]["deadline"] == "2099年12月31日"
+    assert main.history_store.list()[0]["module"] == "doc"
+
+    invalid_pdf = client.post(
+        "/api/doc/check",
+        data={"requirement_text": "请提交 PDF。"},
+        files=[("files", ("伪装材料.pdf", b"not a pdf", "application/pdf"))],
+    )
+    assert invalid_pdf.status_code == 400
 
 
 def test_valid_image_uses_detector_and_persists_history(tmp_path, monkeypatch) -> None:

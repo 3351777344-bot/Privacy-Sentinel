@@ -2,6 +2,7 @@ import json
 import logging
 import re
 import uuid
+import zipfile
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
@@ -24,6 +25,7 @@ from modules.doc_shield.privacy_checker import check_privacy
 from modules.doc_shield.report_generator import generate_report
 from modules.doc_shield.requirement_parser import parse_requirement
 from modules.link_guard.analyzer import analyze_link as run_link_guard
+from modules.link_guard.qr_decoder import decode_qr_image
 from schemas.models import (
     CodeAnalyzeResponse,
     DetectResponse,
@@ -35,6 +37,7 @@ from schemas.models import (
     MaskRequest,
     MaskResponse,
     PrivacyProcessRequest,
+    QrDecodeResponse,
     ScamAnalyzeRequest,
     ScamAnalyzeResponse,
     TextFinding,
@@ -68,6 +71,19 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 def _append_history(record: HistoryRecord) -> None:
     history_store.add(record.model_dump())
+
+
+def _append_analysis_history(module: str, risk_level: str, score: int, summary: str) -> None:
+    history_store.add(
+        {
+            "module": module,
+            "riskLevel": risk_level,
+            "score": score,
+            "summary": summary,
+            "status": "已生成报告",
+            "createdAt": datetime.now().astimezone().isoformat(timespec="seconds"),
+        }
+    )
 
 
 def _update_processed_history(image_id: str, processed_url: str) -> None:
@@ -166,6 +182,36 @@ def _decode_upload(content: bytes) -> str:
         except UnicodeDecodeError:
             continue
     return content.decode("utf-8", errors="ignore")
+
+
+def _validate_document_upload(file_name: str, content: bytes) -> None:
+    extension = Path(file_name).suffix.lower()
+    if not content:
+        raise HTTPException(status_code=400, detail=f"材料文件为空：{file_name}。")
+    if extension == ".pdf" and not content.startswith(b"%PDF-"):
+        raise HTTPException(status_code=400, detail=f"{file_name} 的内容不是有效 PDF。")
+    if extension == ".rar" and not content.startswith((b"Rar!\x1a\x07\x00", b"Rar!\x1a\x07\x01\x00")):
+        raise HTTPException(status_code=400, detail=f"{file_name} 的内容不是有效 RAR。")
+    if extension == ".ppt" and not content.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+        raise HTTPException(status_code=400, detail=f"{file_name} 的内容不是有效 PPT。")
+    if extension in {".zip", ".docx", ".pptx"}:
+        try:
+            with zipfile.ZipFile(BytesIO(content)) as archive:
+                names = archive.namelist()
+                if len(names) > 5000:
+                    raise HTTPException(status_code=400, detail=f"{file_name} 包含过多文件，拒绝处理。")
+                if extension == ".docx" and not any(name.startswith("word/") for name in names):
+                    raise HTTPException(status_code=400, detail=f"{file_name} 的内容不是有效 DOCX。")
+                if extension == ".pptx" and not any(name.startswith("ppt/") for name in names):
+                    raise HTTPException(status_code=400, detail=f"{file_name} 的内容不是有效 PPTX。")
+        except zipfile.BadZipFile:
+            raise HTTPException(status_code=400, detail=f"{file_name} 的压缩结构无效。")
+    if extension in {".png", ".jpg", ".jpeg"}:
+        try:
+            with Image.open(BytesIO(content)) as image:
+                image.verify()
+        except (Image.DecompressionBombError, UnidentifiedImageError, OSError):
+            raise HTTPException(status_code=400, detail=f"{file_name} 的内容不是有效图片。")
 
 
 @app.get("/api/health")
@@ -311,7 +357,9 @@ async def analyze_code(request: Request) -> CodeAnalyzeResponse:
     if not code.strip():
         raise HTTPException(status_code=400, detail="请输入或上传需要检测的代码。")
 
-    return CodeAnalyzeResponse(**run_code_guardian(code=code, language=language, filename=filename))
+    result = CodeAnalyzeResponse(**run_code_guardian(code=code, language=language, filename=filename))
+    _append_analysis_history("code", result.riskLevel, result.score, result.summary)
+    return result
 
 
 @app.post("/api/scam/analyze", response_model=ScamAnalyzeResponse)
@@ -360,7 +408,34 @@ def analyze_scam(request: ScamAnalyzeRequest) -> ScamAnalyzeResponse:
 def check_link(request: LinkCheckRequest) -> LinkCheckResponse:
     if not request.url.strip():
         raise HTTPException(status_code=400, detail="请输入需要检测的 URL。")
-    return LinkCheckResponse(**run_link_guard(request.url, request.source))
+    try:
+        result = LinkCheckResponse(**run_link_guard(request.url, request.source))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="URL 格式不合法，请检查域名、端口和括号是否完整。")
+    _append_analysis_history("link", result.riskLevel, result.score, result.summary)
+    return result
+
+
+@app.post("/api/link/qr/decode", response_model=QrDecodeResponse)
+async def decode_link_qr(file: UploadFile = File(...)) -> QrDecodeResponse:
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="请上传二维码图片。")
+    content = await _read_upload_limited(file, settings.max_image_bytes)
+    if not content:
+        raise HTTPException(status_code=400, detail="二维码图片为空。")
+    try:
+        decoded_texts = decode_qr_image(content, settings.max_image_pixels)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    if not decoded_texts:
+        raise HTTPException(status_code=422, detail="图片中未识别到可用二维码，请换一张更清晰的图片。")
+    return QrDecodeResponse(
+        decodedTexts=decoded_texts,
+        primaryText=decoded_texts[0],
+        message=f"已在本地解析 {len(decoded_texts)} 个二维码，未主动访问其中的链接。",
+    )
 
 
 @app.post("/api/doc/check", response_model=DocCheckResponse)
@@ -379,7 +454,7 @@ async def check_doc(
     parsed_requirements = parse_requirement(requirement_text)
     extracted_files = []
     total_bytes = 0
-    allowed_extensions = {".txt", ".md", ".pdf", ".docx", ".png", ".jpg", ".jpeg", ".zip"}
+    allowed_extensions = {".txt", ".md", ".pdf", ".docx", ".png", ".jpg", ".jpeg", ".zip", ".rar", ".ppt", ".pptx"}
     for file in files:
         file_name = (file.filename or "未命名材料").strip()
         extension = Path(file_name).suffix.lower()
@@ -388,7 +463,9 @@ async def check_doc(
         content = await _read_upload_limited(file, settings.max_doc_bytes)
         total_bytes += len(content)
         if total_bytes > settings.max_doc_total_bytes:
-            raise HTTPException(status_code=413, detail="材料总大小超过 25 MB，请分批检查。")
+            limit_mb = settings.max_doc_total_bytes / (1024 * 1024)
+            raise HTTPException(status_code=413, detail=f"材料总大小超过 {limit_mb:g} MB，请分批检查。")
+        _validate_document_upload(file_name, content)
         extracted_files.append(extract_file(file_name, file.content_type, content))
 
     checks = [
@@ -396,5 +473,6 @@ async def check_doc(
         *check_completeness(extracted_files, parsed_requirements),
         *check_privacy(extracted_files),
     ]
-    report = generate_report(parsed_requirements, extracted_files, checks)
-    return DocCheckResponse(**report)
+    result = DocCheckResponse(**generate_report(parsed_requirements, extracted_files, checks))
+    _append_analysis_history("doc", result.riskLevel, result.score, result.summary)
+    return result
