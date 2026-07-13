@@ -5,11 +5,12 @@ on:
   pull_request:
 
 jobs:
-  verify:
+  backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
           cache: pip
@@ -19,14 +20,20 @@ jobs:
       - name: Run backend tests
         working-directory: platform/backend
         run: python -m pytest
-      - uses: actions/setup-node@v4
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: platform/frontend/package-lock.json
       - name: Install frontend dependencies
         working-directory: platform/frontend
-        run: npm ci
+        run: npm ci --no-audit --no-fund
       - name: Run frontend tests
         working-directory: platform/frontend
         run: npm test
