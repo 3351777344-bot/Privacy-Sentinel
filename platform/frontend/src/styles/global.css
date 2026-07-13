@@ -913,6 +913,17 @@ h2 {
   grid-column: 1 / -1;
 }
 
+.source-tag {
+  display: inline-block;
+  font-size: 11px;
+  background: #e2e8f0;
+  color: #475569;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 .risk-pill {
   align-self: start;
   border-radius: 999px;

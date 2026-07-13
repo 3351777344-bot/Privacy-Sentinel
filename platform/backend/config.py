@@ -25,6 +25,13 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _str_env(name: str, default: str = "") -> str:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip()
+
+
 def _origins_env() -> tuple[str, ...]:
     raw_value = os.getenv("GUARDIANHUB_CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173")
     return tuple(origin.strip() for origin in raw_value.split(",") if origin.strip())
@@ -48,6 +55,10 @@ class Settings:
     face_model_path: str = os.getenv("GUARDIANHUB_FACE_MODEL_PATH", "").strip()
     default_mask_type: str = os.getenv("GUARDIANHUB_DEFAULT_MASK_TYPE", "mosaic").strip().lower()
     enable_external_image_analysis: bool = _bool_env("GUARDIANHUB_ENABLE_EXTERNAL_IMAGE_ANALYSIS")
+    qwen_api_key: str = _str_env("GUARDIANHUB_QWEN_API_KEY")
+    qwen_model: str = _str_env("GUARDIANHUB_QWEN_MODEL", "qwen3.6-flash-2026-04-16")
+    qwen_api_base: str = _str_env("GUARDIANHUB_QWEN_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    qwen_enabled: bool = _bool_env("GUARDIANHUB_QWEN_ENABLED")
 
 
 settings = Settings()
