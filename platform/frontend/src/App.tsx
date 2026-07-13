@@ -9,7 +9,7 @@ import {
   processPrivacyImage,
   toAssetUrl
 } from './api/privacyApi';
-import { HistoryTimeline, RiskBadge, ScoreCard } from './components/RiskComponents';
+import { RiskBadge } from './components/RiskComponents';
 import CodePage from './pages/CodePage';
 import DocPage from './pages/DocPage';
 import LinkPage from './pages/LinkPage';
@@ -165,6 +165,29 @@ export default function App() {
     };
   }, [detectResult, docResult, history, linkResult, codeResult]);
 
+  const riskCounts = useMemo(
+    () => ({
+      high: mergedHistory.filter((item) => item.riskLevel === 'high').length,
+      medium: mergedHistory.filter((item) => item.riskLevel === 'medium').length,
+      low: mergedHistory.filter((item) => item.riskLevel === 'low').length
+    }),
+    [mergedHistory]
+  );
+
+  const moduleGlyphs: Record<ToolPage, string> = {
+    privacy: '◇',
+    code: '</>',
+    link: '↗',
+    doc: '▤'
+  };
+
+  const moduleLabels: Record<ToolPage, string> = {
+    privacy: '隐私哨兵',
+    code: '代码卫士',
+    link: '链接卫士',
+    doc: '提交护盾'
+  };
+
   async function handleDetect(file: File) {
     setLoadingDetect(true);
     setError('');
@@ -259,106 +282,131 @@ export default function App() {
     }
   }
 
+  function openHistory() {
+    setPage('home');
+    window.setTimeout(() => document.getElementById('recent-history')?.scrollIntoView({ behavior: 'smooth' }), 0);
+  }
+
   return (
     <main className="app-shell">
-      <nav className="top-nav">
+      <aside className="side-nav">
         <button className="brand" onClick={() => setPage('home')}>
-          <span>GH</span>
+          <span className="brand-mark">GH</span>
           <strong>GuardianHub</strong>
         </button>
-        <div className="nav-actions">
+        <div className="side-nav-links">
           <button className={page === 'home' ? 'active' : ''} onClick={() => setPage('home')}>
-            安全中心
+            <span className="nav-glyph">⌂</span><span>总览</span>
           </button>
           {modules.map((module) => (
-            <button className={page === module.id ? 'active' : ''} key={module.id} onClick={() => setPage(module.id)}>
-              {module.title}
+            <button aria-label={module.title} className={page === module.id ? 'active' : ''} key={module.id} onClick={() => setPage(module.id)}>
+              <span className="nav-glyph">{moduleGlyphs[module.id]}</span>
+              <span><strong>{module.title.split(' ')[0]}</strong><small>{moduleLabels[module.id]}</small></span>
             </button>
           ))}
+          <div className="nav-separator" />
+          <button onClick={openHistory}><span className="nav-glyph">◷</span><span>历史记录</span></button>
         </div>
-      </nav>
+        <div className="local-promise">
+          <strong>本地防护 · 安心可控</strong>
+          <p>✓ 本地可解释规则检测</p>
+          <p>✓ 材料不出本地设备</p>
+          <p>✓ 不调用第三方模型 API</p>
+        </div>
+        <small className="version-dot">● GuardianHub v0.1.0</small>
+      </aside>
 
-      {error && <div className="error-bar">{error}</div>}
-
-      {page === 'home' && (
-        <>
-          <header className="app-header">
-            <div className="hero-copy">
-              <p className="eyebrow">GuardianHub / AI Digital Safety Platform</p>
-              <h1>安全中心</h1>
-              <h2>面向高校场景的 AI 数字安全防护平台</h2>
-              <p className="header-copy">
-                GuardianHub 将图片隐私检测、代码安全检测、链接安全体检和材料提交检查整合到同一平台。当前版本基于本地规则、正则和关键词运行，适合比赛演示与离线 Demo。
-              </p>
-            </div>
-            <ScoreCard score={score} title="今日安全评分" />
-          </header>
-
-          <section className="intro card">
-            <div>
-              <h3>从提交前、打开前、分享前建立统一防护</h3>
-              <p>
-                平台统一输出 high / medium / low 风险等级、0-100 安全评分、风险证据和建议操作，让学生项目、课程材料和日常链接都能先体检再处理。
-              </p>
-            </div>
-            <div className="intro-tags">
-              <span>图片隐私检测</span>
-              <span>代码安全检测</span>
-              <span>链接安全体检</span>
-              <span>材料提交检查</span>
-            </div>
-          </section>
-
-          <section className="module-grid">
-            {modules.map((module) => {
-              const status = moduleStatus[module.id];
-              return (
-                <article className={`module-card ${module.accent}`} key={module.id}>
-                  <div className="module-card-top">
-                    <span>{status.status}</span>
-                    <RiskBadge level={status.riskLevel} compact />
-                  </div>
-                  <div>
-                    <h3>{module.title}</h3>
-                    <p>{module.subtitle}</p>
-                  </div>
-                  <p>{module.detail}</p>
-                  <div className="module-score">
-                    <small>最近安全评分</small>
-                    <strong>{status.score}</strong>
-                  </div>
-                  <button onClick={() => setPage(module.id)}>进入模块</button>
-                </article>
-              );
-            })}
-          </section>
-
-          <div className="dashboard-grid">
-            <section className="card posture-card">
-              <div className="section-title">
-                <span>S</span>
-                <div>
-                  <h3>平台安全态势</h3>
-                  <p>结合最近检测记录与当前会话报告生成今日评分。</p>
-                </div>
-              </div>
-              <div className="score-meter">
-                <b>{score}</b>
-                <span>Score</span>
-              </div>
-              <div className="posture-row">
-                <span>高风险记录</span>
-                <strong>{mergedHistory.filter((item) => item.riskLevel === 'high').length}</strong>
-              </div>
-              <div className="posture-row">
-                <span>最近检测</span>
-                <strong>{mergedHistory.length}</strong>
-              </div>
-            </section>
-            <HistoryTimeline records={mergedHistory} />
+      <section className="app-main">
+        <header className="top-nav">
+          <div>
+            <p>GuardianHub 安全中心</p>
+            <strong>{page === 'home' ? '面向高校场景的本地数字安全防护平台' : modules.find((item) => item.id === page)?.title}</strong>
           </div>
-        </>
-      )}
+          <div className="top-status"><span>◆</span> Local-Only / 本地处理</div>
+        </header>
+
+        <div className="workspace">
+          {error && <div className="error-bar">{error}</div>}
+
+          {page === 'home' && (
+            <div className="home-dashboard">
+              <h1 className="sr-only">安全中心</h1>
+              <section className="overview-grid">
+                <article className="card overview-score">
+                  <div className="overview-title"><strong>整体安全评分</strong><span title="由当前会话与历史检测综合计算">i</span></div>
+                  <div className="score-overview-body">
+                    <div><b>{score}</b><span>/100</span><p>● {score >= 85 ? '安全状态良好' : score >= 65 ? '存在待复核风险' : '建议优先处理风险'}</p></div>
+                    <div className="score-gauge" style={{ '--score': `${score * 3.6}deg` } as React.CSSProperties}><span>✓</span></div>
+                  </div>
+                </article>
+                <article className="card risk-overview">
+                  <div className="overview-title"><strong>风险总览</strong><span title="来自最近检测历史">i</span></div>
+                  <div className="risk-counts">
+                    <div className="high"><span>高风险</span><b>{riskCounts.high}</b></div>
+                    <div className="medium"><span>中风险</span><b>{riskCounts.medium}</b></div>
+                    <div className="low"><span>低风险</span><b>{riskCounts.low}</b></div>
+                  </div>
+                </article>
+                <article className="card scene-overview">
+                  <div className="overview-title"><strong>场景速览</strong><span title="打开现有检测模块">i</span></div>
+                  <div className="scene-links">
+                    {modules.map((module) => <button key={module.id} className={module.accent} onClick={() => setPage(module.id)}><b>{moduleGlyphs[module.id]}</b><span>{module.subtitle.replace('与打码', '').replace('安全体检', '体检').replace('提交前', '')}</span></button>)}
+                  </div>
+                </article>
+              </section>
+
+              <div className="dashboard-content">
+                <section className="module-panel-grid">
+                  {modules.map((module) => {
+                    const status = moduleStatus[module.id];
+                    return (
+                      <article className={`card dashboard-module ${module.accent}`} key={module.id}>
+                        <div className="dashboard-module-head">
+                          <div><span className="module-icon">{moduleGlyphs[module.id]}</span><h2>{module.title}</h2></div>
+                          <RiskBadge level={status.riskLevel} compact />
+                        </div>
+                        <div className="dashboard-module-body">
+                          <div>
+                            <p className="module-subtitle">{module.subtitle}</p>
+                            <p>{module.detail}</p>
+                            <span className="module-status">● {status.status}</span>
+                          </div>
+                          <div className="mini-score"><small>最近评分</small><strong>{status.score}</strong><span>/ 100</span></div>
+                        </div>
+                        <div className="dashboard-module-footer">
+                          <span>本地规则检测</span>
+                          <button onClick={() => setPage(module.id)}>开始检测 <b>→</b></button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </section>
+
+                <aside className="dashboard-aside">
+                  <section className="card recent-card" id="recent-history">
+                    <div className="aside-title"><h2>最近扫描结果</h2><span>{mergedHistory.length} 条记录</span></div>
+                    {mergedHistory.length === 0 ? <div className="empty-history"><span>◷</span><strong>暂无检测记录</strong><p>完成任一模块检测后，结果会显示在这里。</p></div> : (
+                      <div className="compact-history">
+                        {mergedHistory.slice(0, 6).map((record) => {
+                          const recordModule = (record.module ?? 'privacy') as ToolPage;
+                          return <article key={record.recordId || `${record.imageId}-${record.createdAt}`}><span className="history-glyph">{moduleGlyphs[recordModule]}</span><div><strong>{record.summary}</strong><small>{moduleLabels[recordModule]} · {new Date(record.createdAt).toLocaleString('zh-CN', { hour12: false })}</small></div><RiskBadge level={record.riskLevel} compact /></article>;
+                        })}
+                      </div>
+                    )}
+                  </section>
+                  <section className="card distribution-card">
+                    <div className="aside-title"><h2>风险分布</h2><span>共 {mergedHistory.length} 项</span></div>
+                    <div className="distribution-body">
+                      <div className="risk-donut" style={{ '--high': riskCounts.high, '--medium': riskCounts.medium, '--total': Math.max(mergedHistory.length, 1) } as React.CSSProperties}><span><b>{mergedHistory.length}</b><small>总风险</small></span></div>
+                      <div className="distribution-legend"><p><i className="high" /> high <b>{riskCounts.high}</b></p><p><i className="medium" /> medium <b>{riskCounts.medium}</b></p><p><i className="low" /> low <b>{riskCounts.low}</b></p></div>
+                    </div>
+                  </section>
+                  <section className="card privacy-note"><strong>◆ 安全与隐私承诺</strong><p>检测基于本地可解释规则完成，上传材料不会发送至第三方模型服务。</p></section>
+                </aside>
+              </div>
+              <footer className="rules-footer"><span>◇ 检测基于本地可解释规则引擎</span><span>当前历史记录：{mergedHistory.length} 条</span></footer>
+            </div>
+          )}
 
       {page === 'privacy' && (
         <PrivacyPage
@@ -418,6 +466,8 @@ export default function App() {
           onCheck={handleDocCheck}
         />
       )}
+        </div>
+      </section>
     </main>
   );
 }
