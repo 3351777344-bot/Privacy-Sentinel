@@ -63,6 +63,19 @@ export async function fetchHistory(): Promise<HistoryRecord[]> {
   return parseResponse<HistoryRecord[]>(response);
 }
 
+export async function fetchModuleAverages(): Promise<Record<string, number>> {
+  const response = await fetch(`${API_BASE_URL}/api/history/module-averages`);
+  return parseResponse<Record<string, number>>(response);
+}
+
+export async function deleteHistoryRecord(recordId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/history/${recordId}`, { method: 'DELETE' });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: '删除失败' }));
+    throw new Error(error.detail ?? '删除失败');
+  }
+}
+
 export async function saveHistory(
   module: 'code' | 'link' | 'doc',
   riskLevel: HistoryRecord['riskLevel'],
@@ -114,6 +127,37 @@ export async function decodeQrImage(file: File): Promise<QrDecodeResponse> {
     body: formData
   });
   return parseResponse<QrDecodeResponse>(response);
+}
+
+export async function fixCode(
+  code: string,
+  language: string,
+  items: Array<{type: string, title: string, line?: number | null, snippet: string}>,
+  recordId?: string,
+  originalScore?: number,
+  totalVulns?: number,
+): Promise<{fixedCode: string}> {
+  const response = await fetch(`${API_BASE_URL}/api/code/fix`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, language, items, recordId, originalScore, totalVulns })
+  });
+  return parseResponse<{fixedCode: string}>(response);
+}
+
+export async function exportCode(code: string, language: string, filename?: string): Promise<void> {
+  const extMap: Record<string, string> = { python: '.py', java: '.java', javascript: '.js', typescript: '.ts', sql: '.sql' };
+  const ext = extMap[language] ?? '.txt';
+  const name = filename ?? `fixed_code${ext}`;
+  const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 export async function checkDoc(requirementText: string, files: File[]): Promise<DocCheckResponse> {

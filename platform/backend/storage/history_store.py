@@ -51,6 +51,12 @@ class HistoryStore:
             columns = {row[1] for row in connection.execute("PRAGMA table_info(history)").fetchall()}
             if "score" not in columns:
                 connection.execute("ALTER TABLE history ADD COLUMN score INTEGER")
+            if "result_json" not in columns:
+                connection.execute("ALTER TABLE history ADD COLUMN result_json TEXT")
+            if "processed" not in columns:
+                connection.execute("ALTER TABLE history ADD COLUMN processed INTEGER DEFAULT 0")
+            if "processed_score" not in columns:
+                connection.execute("ALTER TABLE history ADD COLUMN processed_score INTEGER")
             existing = connection.execute("SELECT COUNT(*) FROM history").fetchone()[0]
             if existing == 0:
                 self._migrate_legacy_records(connection)
@@ -79,6 +85,9 @@ class HistoryStore:
             "summary": str(record.get("summary") or ""),
             "createdAt": str(record.get("createdAt") or datetime.now().astimezone().isoformat(timespec="seconds")),
             "status": str(record.get("status") or "已生成报告"),
+            "resultJson": record.get("resultJson"),
+            "processed": bool(record.get("processed", False)),
+            "processedScore": record.get("processedScore"),
         }
 
     @staticmethod
@@ -87,8 +96,8 @@ class HistoryStore:
             """
             INSERT OR REPLACE INTO history (
                 record_id, module, image_id, original_image_url, processed_image_url,
-                risk_level, score, summary, created_at, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                risk_level, score, summary, created_at, status, result_json, processed, processed_score
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record["recordId"],
@@ -101,6 +110,9 @@ class HistoryStore:
                 record["summary"],
                 record["createdAt"],
                 record["status"],
+                record.get("resultJson"),
+                1 if record.get("processed") else 0,
+                record.get("processedScore"),
             ),
         )
 
@@ -125,16 +137,16 @@ class HistoryStore:
             ).fetchall()
         return [self._row_to_record(row) for row in rows]
 
-    def update_processed(self, image_id: str, processed_url: str) -> None:
+    def update_processed(self, image_id: str, processed_url: str, processed_score: int | None = None) -> None:
         with self._lock, self._connect() as connection:
-            connection.execute(
-                """
-                UPDATE history
-                SET processed_image_url = ?, status = '已处理'
-                WHERE image_id = ? AND module = 'privacy'
-                """,
-                (processed_url, image_id),
-            )
+            query = "UPDATE history SET processed_image_url = ?, status = '已处理', processed = 1"
+            params: list[Any] = [processed_url]
+            if processed_score is not None:
+                query += ", processed_score = ?"
+                params.append(processed_score)
+            query += " WHERE image_id = ? AND module = 'privacy'"
+            params.append(image_id)
+            connection.execute(query, params)
 
     def delete_expired(self, retention_hours: int) -> None:
         if retention_hours <= 0:
@@ -156,4 +168,35 @@ class HistoryStore:
             "summary": row["summary"],
             "createdAt": row["created_at"],
             "status": row["status"],
+            "resultJson": row["result_json"],
+            "processed": bool(row["processed"]),
+            "processedScore": row["processed_score"],
         }
+
+    def get_by_id(self, record_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM history WHERE record_id = ?", (record_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_record(row)
+
+    def module_averages(self) -> dict[str, int]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT module, AVG(COALESCE(processed_score, score)) as avg_score FROM history GROUP BY module"
+            ).fetchall()
+        return {row["module"]: int(round(row["avg_score"])) for row in rows if row["avg_score"] is not None}
+
+    def delete_by_id(self, record_id: str) -> bool:
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute("DELETE FROM history WHERE record_id = ?", (record_id,))
+            return cursor.rowcount > 0
+
+    def mark_processed(self, record_id: str, processed_score: int) -> None:
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                "UPDATE history SET processed=1, processed_score=?, status='已处理' WHERE record_id=?",
+                (processed_score, record_id),
+            )

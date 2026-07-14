@@ -43,6 +43,9 @@ export interface HistoryRecord {
   summary: string;
   createdAt: string;
   status: string;
+  resultJson?: string | null;
+  processed?: boolean;
+  processedScore?: number | null;
 }
 
 export interface MaskResponse {
@@ -65,6 +68,7 @@ export interface CodeVulnerability {
   snippet: string;
   reason: string;
   suggestion: string;
+  source?: 'rule' | 'deepseek';
 }
 
 export interface CodeAnalyzeResponse {
@@ -77,6 +81,7 @@ export interface CodeAnalyzeResponse {
   vulnerabilities: CodeVulnerability[];
   suggestions: string[];
   shouldSubmit: boolean;
+  detectorSource?: 'rule' | 'deepseek';
 }
 
 export interface LinkCheckItem {

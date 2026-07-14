@@ -7,8 +7,9 @@ from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 
@@ -28,6 +29,8 @@ from modules.link_guard.analyzer import analyze_link as run_link_guard
 from modules.link_guard.qr_decoder import decode_qr_image
 from schemas.models import (
     CodeAnalyzeResponse,
+    CodeFixRequest,
+    CodeFixResponse,
     DetectResponse,
     DocCheckResponse,
     HistoryRecord,
@@ -69,25 +72,37 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
-def _append_history(record: HistoryRecord) -> None:
-    history_store.add(record.model_dump())
+def _append_history(record: HistoryRecord, result_json: str | None = None) -> None:
+    data = record.model_dump()
+    if result_json is not None:
+        data["resultJson"] = result_json
+    if record.score == 100:
+        data["processed"] = True
+        data["processedScore"] = 100
+        data["status"] = "已处理"
+    history_store.add(data)
 
 
-def _append_analysis_history(module: str, risk_level: str, score: int, summary: str) -> None:
-    history_store.add(
-        {
-            "module": module,
-            "riskLevel": risk_level,
-            "score": score,
-            "summary": summary,
-            "status": "已生成报告",
-            "createdAt": datetime.now().astimezone().isoformat(timespec="seconds"),
-        }
-    )
+def _append_analysis_history(module: str, risk_level: str, score: int, summary: str, result_json: str | None = None) -> None:
+    data: dict[str, object] = {
+        "module": module,
+        "riskLevel": risk_level,
+        "score": score,
+        "summary": summary,
+        "status": "已生成报告",
+        "createdAt": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+    if result_json is not None:
+        data["resultJson"] = result_json
+    if score == 100:
+        data["processed"] = True
+        data["processedScore"] = 100
+        data["status"] = "已处理"
+    history_store.add(data)
 
 
-def _update_processed_history(image_id: str, processed_url: str) -> None:
-    history_store.update_processed(image_id, processed_url)
+def _update_processed_history(image_id: str, processed_url: str, processed_score: int | None = None) -> None:
+    history_store.update_processed(image_id, processed_url, processed_score)
 
 
 async def _read_upload_limited(file: UploadFile, max_bytes: int) -> bytes:
@@ -149,6 +164,14 @@ def _valid_mask_type(mask_type: str | None) -> str:
 
 
 def _apply_mask(image_id: str, mask_type: str, boxes: list) -> MaskResponse:
+    detection = _load_detection_result(image_id)
+    total_items = len(detection.items)
+    processed_count = len(boxes)
+    ratio = min(1.0, processed_count / max(total_items, 1))
+    original_score = detection.score
+    improvement = int(round((100 - original_score) * ratio * 0.8))
+    new_score = min(100, original_score + improvement)
+
     image_path = _find_uploaded_image(image_id)
     with Image.open(image_path) as image:
         if mask_type == "black":
@@ -163,8 +186,8 @@ def _apply_mask(image_id: str, mask_type: str, boxes: list) -> MaskResponse:
     output.save(processed_path, format="PNG")
 
     processed_url = f"/static/processed/{processed_name}"
-    _update_processed_history(image_id, processed_url)
-    return MaskResponse(processedImageUrl=processed_url, message="Local privacy processing completed.")
+    _update_processed_history(image_id, processed_url, new_score)
+    return MaskResponse(processedImageUrl=processed_url, message=f"处理完成（{processed_count}/{total_items} 项），评分提升：{original_score} → {new_score}")
 
 
 def _level_from_score(score: int) -> str:
@@ -272,7 +295,8 @@ async def detect(file: UploadFile = File(...)) -> DetectResponse:
             summary=result.summary,
             createdAt=datetime.now().astimezone().isoformat(timespec="seconds"),
             status="待处理",
-        )
+        ),
+        result_json=result.model_dump_json(),
     )
     return result
 
@@ -304,6 +328,19 @@ def process_privacy_image(request: PrivacyProcessRequest) -> MaskResponse:
 def history() -> list[HistoryRecord]:
     _cleanup_expired_files()
     return [HistoryRecord(**record) for record in history_store.list()]
+
+@app.get("/api/history/module-averages")
+def module_averages() -> dict[str, int]:
+    averages = history_store.module_averages()
+    defaults = {"privacy": 100, "code": 100, "link": 100, "doc": 100}
+    return {key: averages.get(key, defaults[key]) for key in defaults}
+
+@app.delete("/api/history/{record_id}")
+def delete_history_record(record_id: str) -> dict[str, bool]:
+    deleted = history_store.delete_by_id(record_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="记录不存在。")
+    return {"ok": True}
 
 
 @app.post("/api/history", response_model=HistoryRecord)
@@ -358,7 +395,7 @@ async def analyze_code(request: Request) -> CodeAnalyzeResponse:
         raise HTTPException(status_code=400, detail="请输入或上传需要检测的代码。")
 
     result = CodeAnalyzeResponse(**run_code_guardian(code=code, language=language, filename=filename))
-    _append_analysis_history("code", result.riskLevel, result.score, result.summary)
+    _append_analysis_history("code", result.riskLevel, result.score, result.summary, result_json=result.model_dump_json())
     return result
 
 
@@ -412,7 +449,7 @@ def check_link(request: LinkCheckRequest) -> LinkCheckResponse:
         result = LinkCheckResponse(**run_link_guard(request.url, request.source))
     except ValueError:
         raise HTTPException(status_code=400, detail="URL 格式不合法，请检查域名、端口和括号是否完整。")
-    _append_analysis_history("link", result.riskLevel, result.score, result.summary)
+    _append_analysis_history("link", result.riskLevel, result.score, result.summary, result_json=result.model_dump_json())
     return result
 
 
@@ -474,5 +511,92 @@ async def check_doc(
         *check_privacy(extracted_files),
     ]
     result = DocCheckResponse(**generate_report(parsed_requirements, extracted_files, checks))
-    _append_analysis_history("doc", result.riskLevel, result.score, result.summary)
+    _append_analysis_history("doc", result.riskLevel, result.score, result.summary, result_json=result.model_dump_json())
     return result
+
+
+@app.post("/api/export/image/{image_id}")
+def export_image(image_id: str) -> FileResponse:
+    processed_path = PROCESSED_DIR / f"{image_id}_safe.png"
+    if not processed_path.exists():
+        raise HTTPException(status_code=404, detail="已处理图片不存在，请先完成隐私处理。")
+    return FileResponse(
+        path=processed_path,
+        media_type="image/png",
+        filename=f"{image_id}_safe.png",
+        headers={"Content-Disposition": f'attachment; filename="{image_id}_safe.png"'},
+    )
+
+
+@app.post("/api/code/fix", response_model=CodeFixResponse)
+def fix_code(request: CodeFixRequest) -> CodeFixResponse:
+    from openai import OpenAI
+
+    if not settings.deepseek_enabled or not settings.deepseek_api_key:
+        raise HTTPException(status_code=503, detail="DeepSeek 代码修复服务未启用。")
+
+    items_desc = ""
+    if request.items:
+        vulns_desc = []
+        for item in request.items:
+            t = item.get("title", "")
+            ln = item.get("line", "")
+            sn = item.get("snippet", "")
+            vulns_desc.append(f"- [{t}] line {ln}: {sn}")
+        items_desc = "Focus on fixing these specific vulnerabilities:\n" + "\n".join(vulns_desc) + "\n\n"
+
+    prompt = f"""You are an expert code fixer. {items_desc}Fix all security issues in the following {request.language} code.
+Return ONLY a JSON object with this exact structure:
+{{
+  "fixed_code": "the fully corrected code as a string",
+  "explanation": "brief explanation of changes in Chinese"
+}}
+
+Code to fix ({request.language}):
+```{request.language}
+{request.code}
+```"""
+
+    try:
+        client = OpenAI(api_key=settings.deepseek_api_key, base_url=settings.deepseek_api_base)
+        response = client.chat.completions.create(
+            model=settings.deepseek_model,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            max_tokens=8192,
+            temperature=0.1,
+        )
+        content = response.choices[0].message.content
+        if not content:
+            raise HTTPException(status_code=502, detail="DeepSeek 未返回有效响应。")
+        result = json.loads(content)
+
+        if request.recordId and request.totalVulns > 0:
+            fixed = len(request.items)
+            improvement = int(round((100 - request.originalScore) * (fixed / request.totalVulns) * 0.8))
+            new_score = min(100, request.originalScore + improvement)
+            history_store.mark_processed(request.recordId, new_score)
+
+        return CodeFixResponse(
+            fixedCode=result.get("fixed_code", ""),
+            explanation=result.get("explanation", ""),
+            language=request.language,
+        )
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail="无法解析 AI 修复结果。")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("DeepSeek code fix failed")
+        raise HTTPException(status_code=502, detail=f"代码修复失败：{exc}")
+
+
+@app.post("/api/export/code")
+def export_code(code: str = Form(...)) -> Response:
+    if not code.strip():
+        raise HTTPException(status_code=400, detail="代码内容为空。")
+    return Response(
+        content=code.encode("utf-8"),
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="fixed_code.txt"'},
+    )

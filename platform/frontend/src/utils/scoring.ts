@@ -4,13 +4,14 @@ export type GuardianModule = 'privacy' | 'code' | 'link' | 'doc';
 
 export const GUARDIAN_MODULES: GuardianModule[] = ['privacy', 'code', 'link', 'doc'];
 
-export function calculateOverallScore(
-  records: HistoryRecord[],
-  latestScores: Partial<Record<GuardianModule, number>>
-): number {
-  const scores = GUARDIAN_MODULES.map(
-    (module) => latestScores[module] ?? records.find((record) => (record.module ?? 'privacy') === module)?.score
-  ).filter((score): score is number => typeof score === 'number');
+export function calculateOverallScore(moduleAverages: Partial<Record<GuardianModule, number>>): number {
+  const scores = GUARDIAN_MODULES
+    .map((m) => moduleAverages[m])
+    .filter((s): s is number => typeof s === 'number' && !isNaN(s));
 
-  return scores.length ? Math.round(scores.reduce((total, score) => total + score, 0) / scores.length) : 96;
+  return scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 100;
+}
+
+export function effectiveScore(record: HistoryRecord): number {
+  return record.processedScore ?? record.score ?? 100;
 }

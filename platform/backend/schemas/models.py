@@ -68,6 +68,9 @@ class HistoryRecord(BaseModel):
     summary: str
     createdAt: str
     status: str
+    resultJson: Optional[str] = None
+    processed: bool = False
+    processedScore: Optional[int] = Field(default=None, ge=0, le=100)
 
 
 class HistoryCreate(BaseModel):
@@ -98,6 +101,7 @@ class CodeVulnerability(BaseModel):
     snippet: str
     reason: str
     suggestion: str
+    source: Literal["rule", "deepseek"] = "rule"
 
 
 class CodeAnalyzeResponse(BaseModel):
@@ -110,6 +114,7 @@ class CodeAnalyzeResponse(BaseModel):
     vulnerabilities: List[CodeVulnerability]
     suggestions: List[str]
     shouldSubmit: bool
+    detectorSource: Literal["rule", "deepseek"] = "rule"
 
 
 class ScamAnalyzeRequest(BaseModel):
@@ -201,3 +206,18 @@ class DocCheckResponse(BaseModel):
     files: List[DocFileSummary]
     checks: List[DocCheckItem]
     suggestions: List[str]
+
+
+class CodeFixRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=50000)
+    language: str = Field(default="python", max_length=50)
+    items: list[dict] = Field(default_factory=list)
+    recordId: str = ""
+    originalScore: int = 0
+    totalVulns: int = 0
+
+
+class CodeFixResponse(BaseModel):
+    fixedCode: str
+    explanation: str = ""
+    language: str

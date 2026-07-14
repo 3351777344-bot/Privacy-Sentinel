@@ -59,6 +59,11 @@ class Settings:
     qwen_model: str = _str_env("GUARDIANHUB_QWEN_MODEL", "qwen3.6-flash-2026-04-16")
     qwen_api_base: str = _str_env("GUARDIANHUB_QWEN_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
     qwen_enabled: bool = _bool_env("GUARDIANHUB_QWEN_ENABLED")
+    code_engine: str = os.getenv("GUARDIANHUB_CODE_ENGINE", "deepseek").strip().lower()
+    deepseek_api_key: str = _str_env("GUARDIANHUB_DEEPSEEK_API_KEY")
+    deepseek_model: str = _str_env("GUARDIANHUB_DEEPSEEK_MODEL", "deepseek-v4-flash")
+    deepseek_api_base: str = _str_env("GUARDIANHUB_DEEPSEEK_API_BASE", "https://api.deepseek.com")
+    deepseek_enabled: bool = _bool_env("GUARDIANHUB_DEEPSEEK_ENABLED")
 
 
 settings = Settings()

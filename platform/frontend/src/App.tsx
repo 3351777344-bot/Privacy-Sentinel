@@ -4,14 +4,19 @@ import {
   checkDoc,
   checkLink,
   decodeQrImage,
+  deleteHistoryRecord,
   detectImage,
+  exportCode,
   fetchHistory,
+  fetchModuleAverages,
+  fixCode,
   processPrivacyImage,
   toAssetUrl
 } from './api/privacyApi';
 import { RiskBadge } from './components/RiskComponents';
 import CodePage from './pages/CodePage';
 import DocPage from './pages/DocPage';
+import HistoryPage from './pages/HistoryPage';
 import LinkPage from './pages/LinkPage';
 import PrivacyPage from './pages/PrivacyPage';
 import type {
@@ -25,8 +30,8 @@ import type {
 } from './types/privacy';
 import { calculateOverallScore } from './utils/scoring';
 
-type Page = 'home' | 'privacy' | 'code' | 'link' | 'doc';
-type ToolPage = Exclude<Page, 'home'>;
+type Page = 'home' | 'privacy' | 'code' | 'link' | 'doc' | 'history';
+type ToolPage = Exclude<Page, 'home' | 'history'>;
 
 const modules: Array<{
   id: ToolPage;
@@ -76,17 +81,12 @@ print("token", api_key)`;
 const sampleDocRequirement =
   '课程论文提交要求：请于 2026 年 7 月 10 日 18:00 前提交 PDF 文件，命名规则为 学号-姓名-课程论文。材料需包含封面、摘要、正文、参考文献；正文不少于 3000 字。';
 
-function scoreFromRisk(level: RiskLevel) {
-  if (level === 'high') return 48;
-  if (level === 'medium') return 74;
-  return 92;
-}
-
 export default function App() {
   const [page, setPage] = useState<Page>('home');
   const [detectResult, setDetectResult] = useState<DetectResult | null>(null);
   const [processedUrl, setProcessedUrl] = useState('');
   const [history, setHistory] = useState<HistoryRecord[]>([]);
+  const [moduleAverages, setModuleAverages] = useState<Record<string, number>>({});
   const [maskType, setMaskType] = useState<MaskType>('black');
   const [loadingDetect, setLoadingDetect] = useState(false);
   const [loadingMask, setLoadingMask] = useState(false);
@@ -111,9 +111,14 @@ export default function App() {
   const [docResult, setDocResult] = useState<DocCheckResponse | null>(null);
   const [loadingDoc, setLoadingDoc] = useState(false);
 
+  const [selectedHistoryRecord, setSelectedHistoryRecord] = useState<HistoryRecord | null>(null);
+  const [fixedCode, setFixedCode] = useState<string | null>(null);
+  const [loadingFix, setLoadingFix] = useState(false);
+
   async function refreshHistory() {
     try {
       setHistory(await fetchHistory());
+      setModuleAverages(await fetchModuleAverages());
     } catch {
       setHistory([]);
     }
@@ -123,20 +128,20 @@ export default function App() {
     refreshHistory();
   }, []);
 
+  useEffect(() => {
+    const interval = setInterval(refreshHistory, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
   const mergedHistory = history;
   const score = useMemo(
-    () =>
-      calculateOverallScore(mergedHistory, {
-        privacy: detectResult?.score,
-        code: codeResult?.score,
-        link: linkResult?.score,
-        doc: docResult?.score
-      }),
-    [detectResult, docResult, linkResult, mergedHistory, codeResult]
+    () => calculateOverallScore(moduleAverages),
+    [moduleAverages]
   );
 
   const moduleStatus = useMemo(() => {
-    const latest = (module: 'privacy' | 'code' | 'link' | 'doc') => history.find((item) => (item.module ?? 'privacy') === module);
+    const latest = (module: string) => history.find((item) => (item.module ?? 'privacy') === module);
+    const avgScore = (module: string) => moduleAverages[module] ?? 100;
     const latestPrivacy = latest('privacy');
     const latestCode = latest('code');
     const latestLink = latest('link');
@@ -144,22 +149,22 @@ export default function App() {
     return {
       privacy: {
         riskLevel: detectResult?.riskLevel ?? latestPrivacy?.riskLevel ?? ('low' as RiskLevel),
-        score: detectResult?.score ?? latestPrivacy?.score ?? (latestPrivacy ? scoreFromRisk(latestPrivacy.riskLevel) : 92),
+        score: avgScore('privacy'),
         status: detectResult ? detectResult.summary : latestPrivacy?.summary ?? '等待图片检测'
       },
       code: {
         riskLevel: codeResult?.riskLevel ?? latestCode?.riskLevel ?? ('low' as RiskLevel),
-        score: codeResult?.score ?? latestCode?.score ?? (latestCode ? scoreFromRisk(latestCode.riskLevel) : 92),
+        score: avgScore('code'),
         status: codeResult ? `发现 ${codeResult.vulnerabilities.length} 项代码风险` : latestCode?.summary ?? '等待代码检测'
       },
       link: {
         riskLevel: linkResult?.riskLevel ?? latestLink?.riskLevel ?? ('low' as RiskLevel),
-        score: linkResult?.score ?? latestLink?.score ?? (latestLink ? scoreFromRisk(latestLink.riskLevel) : 92),
+        score: avgScore('link'),
         status: linkResult ? `完成 ${linkResult.checks.length} 项链接体检` : latestLink?.summary ?? '等待链接体检'
       },
       doc: {
         riskLevel: docResult?.riskLevel ?? latestDoc?.riskLevel ?? ('low' as RiskLevel),
-        score: docResult?.score ?? latestDoc?.score ?? (latestDoc ? scoreFromRisk(latestDoc.riskLevel) : 92),
+        score: avgScore('doc'),
         status: docResult?.summary ?? latestDoc?.summary ?? '等待材料检查'
       }
     };
@@ -223,10 +228,13 @@ export default function App() {
       setError('项目级扫描为后续扩展功能，请先上传单个代码文件或粘贴代码。');
       return;
     }
+    if (codeFile && !codeText.trim()) {
+      setCodeText(await codeFile.text());
+    }
     setLoadingCode(true);
     setError('');
     try {
-      const result = await analyzeCode(codeLanguage, codeText, codeFile);
+      const result = await analyzeCode(codeLanguage, codeText || await (codeFile?.text() ?? ''), codeFile);
       setCodeResult(result);
       await refreshHistory();
     } catch (err) {
@@ -283,8 +291,66 @@ export default function App() {
   }
 
   function openHistory() {
-    setPage('home');
-    window.setTimeout(() => document.getElementById('recent-history')?.scrollIntoView({ behavior: 'smooth' }), 0);
+    setPage('history');
+  }
+
+  function handleHistoryNavigate(module: string, recordId: string) {
+    const record = history.find((r) => r.recordId === recordId);
+    if (!record) return;
+    setSelectedHistoryRecord(record);
+
+    if (record.resultJson) {
+      try {
+        const parsed = JSON.parse(record.resultJson);
+        if (module === 'code') {
+          setCodeResult(parsed as CodeAnalyzeResponse);
+          if (record.summary) setCodeText('');
+        } else if (module === 'link') {
+          setLinkResult(parsed as LinkCheckResponse);
+        } else if (module === 'doc') {
+          setDocResult(parsed as DocCheckResponse);
+        } else if (module === 'privacy') {
+          setDetectResult(parsed as DetectResult);
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+    setFixedCode(null);
+    setPage(module as ToolPage);
+  }
+
+  async function handleCodeFix(items: Array<{type: string, title: string, line?: number | null, snippet: string}>) {
+    setLoadingFix(true);
+    setError('');
+    try {
+      const latestCode = history.find((r) => r.module === 'code');
+      const result = await fixCode(
+        codeText,
+        codeLanguage,
+        items,
+        latestCode?.recordId,
+        codeResult?.score ?? 100,
+        codeResult?.vulnerabilities.length ?? 0,
+      );
+      setFixedCode(result.fixedCode);
+      await refreshHistory();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '代码修复失败，请稍后重试。');
+    } finally {
+      setLoadingFix(false);
+    }
+  }
+
+  async function handleHistoryDelete(recordId: string) {
+    await deleteHistoryRecord(recordId);
+    await refreshHistory();
+  }
+
+  function handleCodeExport() {
+    if (fixedCode) {
+      exportCode(fixedCode, codeLanguage);
+    }
   }
 
   return (
@@ -429,11 +495,15 @@ export default function App() {
           file={codeFile}
           result={codeResult}
           loading={loadingCode}
+          fixedCode={fixedCode}
+          loadingFix={loadingFix}
           onBack={() => setPage('home')}
           onTextChange={setCodeText}
           onLanguageChange={setCodeLanguage}
           onFileChange={setCodeFile}
           onAnalyze={handleCodeAnalyze}
+          onFix={handleCodeFix}
+          onExport={handleCodeExport}
         />
       )}
 
@@ -464,6 +534,15 @@ export default function App() {
           onRequirementChange={setDocRequirement}
           onFilesChange={setDocFiles}
           onCheck={handleDocCheck}
+        />
+      )}
+
+      {page === 'history' && (
+        <HistoryPage
+          records={history}
+          onBack={() => setPage('home')}
+          onNavigate={handleHistoryNavigate}
+          onDelete={handleHistoryDelete}
         />
       )}
         </div>
