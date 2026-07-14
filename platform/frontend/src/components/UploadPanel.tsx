@@ -23,7 +23,7 @@ export default function UploadPanel({ loading, onDetect }: UploadPanelProps) {
           <p>选择截图、快递单、订单页或聊天记录，先扫描潜在隐私风险。</p>
         </div>
       </div>
-      <div className="upload-box" onClick={() => inputRef.current?.click()} role="button" tabIndex={0}>
+      <div className={`upload-box ${loading ? 'scanning' : ''}`} onClick={() => !loading && inputRef.current?.click()} role="button" tabIndex={0}>
         <input
           ref={inputRef}
           type="file"
