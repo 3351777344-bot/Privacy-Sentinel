@@ -55,20 +55,37 @@ export default function HistoryPage({ records, onBack, onNavigate, onDelete }: H
 
       <div className="history-page-grid">
         <aside className="history-filter-bar">
+          {/* 方案 B：横向三等分网格 — 统计卡片（默认） */}
           <div className="history-stats card">
-            <div className="stat-row"><span>总记录</span><b>{stats.total}</b></div>
-            <div className="stat-row" style={{ color: '#059669' }}><span>已处理</span><b>{stats.processed}</b></div>
-            <div className="stat-row" style={{ color: '#d97706' }}><span>待处理</span><b>{stats.pending}</b></div>
+            <div className="stat-grid">
+              <div className="stat-item">
+                <span className="stat-label">总记录</span>
+                <b className="stat-value">{stats.total}</b>
+              </div>
+              <div className="stat-item processed">
+                <span className="stat-label">已处理</span>
+                <b className="stat-value">{stats.processed}</b>
+              </div>
+              <div className="stat-item pending">
+                <span className="stat-label">待处理</span>
+                <b className="stat-value">{stats.pending}</b>
+              </div>
+            </div>
           </div>
 
+
           <div className="history-filter card">
-            <h4>模块筛选</h4>
-            <button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>全部</button>
-            {Object.entries(MODULE_LABELS).map(([key, label]) => (
-              <button key={key} className={filter === key ? 'active' : ''} onClick={() => setFilter(key)}>
-                <span className="filter-glyph">{MODULE_GLYPHS[key]}</span> {label}
+            <h4 className="filter-title">模块筛选</h4>
+            <div className="filter-list">
+              <button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>
+                <span className="filter-glyph">📋</span>全部
               </button>
-            ))}
+              {Object.entries(MODULE_LABELS).map(([key, label]) => (
+                <button key={key} className={filter === key ? 'active' : ''} onClick={() => setFilter(key)}>
+                  <span className="filter-glyph">{MODULE_GLYPHS[key]}</span>{label}
+                </button>
+              ))}
+            </div>
           </div>
         </aside>
 

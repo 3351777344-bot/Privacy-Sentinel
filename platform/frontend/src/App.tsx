@@ -26,6 +26,7 @@ import type {
   HistoryRecord,
   LinkCheckResponse,
   MaskType,
+  PaginatedHistory,
   RiskLevel
 } from './types/privacy';
 import { calculateOverallScore } from './utils/scoring';
@@ -86,6 +87,7 @@ export default function App() {
   const [detectResult, setDetectResult] = useState<DetectResult | null>(null);
   const [processedUrl, setProcessedUrl] = useState('');
   const [history, setHistory] = useState<HistoryRecord[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
   const [moduleAverages, setModuleAverages] = useState<Record<string, number>>({});
   const [maskType, setMaskType] = useState<MaskType>('black');
   const [loadingDetect, setLoadingDetect] = useState(false);
@@ -117,10 +119,13 @@ export default function App() {
 
   async function refreshHistory() {
     try {
-      setHistory(await fetchHistory());
+      const result = await fetchHistory(0, 100);
+      setHistory(result.records);
+      setHistoryTotal(result.total);
       setModuleAverages(await fetchModuleAverages());
     } catch {
       setHistory([]);
+      setHistoryTotal(0);
     }
   }
 
@@ -128,10 +133,13 @@ export default function App() {
     refreshHistory();
   }, []);
 
+  // Only poll for new history when on Dashboard or History page
+  const shouldPoll = page === 'home' || page === 'history';
   useEffect(() => {
+    if (!shouldPoll) return;
     const interval = setInterval(refreshHistory, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [shouldPoll]);
 
   const mergedHistory = history;
   const score = useMemo(

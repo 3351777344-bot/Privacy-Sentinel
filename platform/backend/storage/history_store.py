@@ -129,13 +129,19 @@ class HistoryStore:
             )
         return normalized
 
-    def list(self, limit: int = 20) -> list[dict[str, Any]]:
+    def list(self, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
         safe_limit = max(1, min(limit, 100))
+        safe_offset = max(0, offset)
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM history ORDER BY created_at DESC, rowid DESC LIMIT ?", (safe_limit,)
+                "SELECT * FROM history ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?", (safe_limit, safe_offset)
             ).fetchall()
         return [self._row_to_record(row) for row in rows]
+
+    def count(self) -> int:
+        with self._connect() as connection:
+            row = connection.execute("SELECT COUNT(*) as cnt FROM history").fetchone()
+            return row["cnt"] if row else 0
 
     def update_processed(self, image_id: str, processed_url: str, processed_score: int | None = None) -> None:
         with self._lock, self._connect() as connection:

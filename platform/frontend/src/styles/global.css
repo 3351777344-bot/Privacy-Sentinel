@@ -16,7 +16,6 @@ html {
 
 body {
   margin: 0;
-  min-width: 1080px;
   background:
     radial-gradient(circle at 8% 0%, rgba(37, 99, 235, 0.16), transparent 30%),
     radial-gradient(circle at 92% 10%, rgba(20, 184, 166, 0.14), transparent 28%),
@@ -442,6 +441,15 @@ h2 {
   color: #68758a;
   font-size: 14px;
 }
+.deepseek-warning {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 6px;
+  color: #856404;
+  font-size: 13px;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+}
 
 .page-hero {
   align-items: center;
@@ -511,6 +519,17 @@ h2 {
   padding: 28px;
   text-align: center;
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.upload-box.upload-error {
+  border-color: #dc2626;
+  background: linear-gradient(180deg, rgba(254, 242, 242, 0.86), rgba(255, 255, 255, 0.96));
+}
+
+.upload-error-msg {
+  color: #dc2626;
+  font-size: 13px;
+  margin: 4px 0 0;
 }
 
 .upload-box:hover {
@@ -2124,57 +2143,132 @@ body {
   90% { opacity: 1; }
   100% { top: 110%; opacity: 0; }
 }
+/* ── History Page Layout ── */
 .history-page-grid {
   display: grid;
-  grid-template-columns: 200px 1fr;
-  gap: 24px;
+  grid-template-columns: 220px 1fr;
+  gap: 28px;
   align-items: start;
 }
 
 .history-filter-bar {
   display: grid;
-  gap: 16px;
+  gap: 20px;
 }
 
-.history-stats .stat-row {
+/* Override global .card for history sidebar cards */
+.history-stats.card,
+.history-filter.card {
+  padding: 20px;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 2px 12px rgba(15, 23, 42, 0.06);
+  transition: box-shadow 0.2s ease;
+}
+
+.history-stats.card:hover,
+.history-filter.card:hover {
+  transform: none;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 2px 12px rgba(15, 23, 42, 0.06);
+}
+
+/* ── Stats Card · 方案 B：横向三等分网格 ── */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.stat-item {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
   align-items: center;
-  padding: 6px 0;
-  font-size: 14px;
-  border-bottom: 1px solid #f1f5f9;
+  padding: 14px 6px 12px;
+  border-radius: 10px;
+  background: #f8fafc;
+  transition: background 0.15s;
 }
 
-.history-stats .stat-row:last-child { border-bottom: 0; }
+.stat-item:hover {
+  background: #f1f5f9;
+}
 
-.history-stats .stat-row b { font-size: 16px; }
+.stat-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: #94a3b8;
+  letter-spacing: 0.4px;
+  margin-bottom: 4px;
+}
 
-.history-stats .stat-row.high b { color: #dc2626; }
-.history-stats .stat-row.medium b { color: #d97706; }
-.history-stats .stat-row.low b { color: #16a34a; }
+.stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1e293b;
+  line-height: 1;
+}
+
+.stat-item.processed .stat-value { color: #059669; }
+.stat-item.pending  .stat-value { color: #d97706; }
+
+
+
+.history-stats .stat-row.processed b { color: #059669; }
+.history-stats .stat-row.pending  b { color: #d97706; }
+*/
+
+/* ── Filter Card ── */
+.history-filter .filter-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin: 0 0 12px 0;
+}
+
+.history-filter .filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 
 .history-filter button {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   text-align: left;
-  padding: 6px 10px;
-  margin-top: 4px;
+  padding: 9px 12px;
   background: none;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 14px;
   color: #475569;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
 }
 
-.history-filter button:hover,
-.history-filter button.active {
-  background: #f1f5f9;
+.history-filter button:hover {
+  background: #f8fafc;
   color: #1e293b;
   border-color: #e2e8f0;
 }
 
-.history-filter button .filter-glyph { margin-right: 4px; }
+.history-filter button.active {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+  font-weight: 600;
+}
+
+.history-filter button .filter-glyph {
+  font-size: 16px;
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+  line-height: 1;
+}
 
 .history-timeline {
   display: grid;

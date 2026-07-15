@@ -41,9 +41,6 @@ from schemas.models import (
     MaskResponse,
     PrivacyProcessRequest,
     QrDecodeResponse,
-    ScamAnalyzeRequest,
-    ScamAnalyzeResponse,
-    TextFinding,
 )
 from storage.history_store import HistoryStore
 
@@ -324,10 +321,12 @@ def process_privacy_image(request: PrivacyProcessRequest) -> MaskResponse:
     return _apply_mask(request.imageId, mask_type, [item.box for item in selected_items])
 
 
-@app.get("/api/history", response_model=list[HistoryRecord])
-def history() -> list[HistoryRecord]:
+@app.get("/api/history")
+def history(offset: int = Query(default=0, ge=0), limit: int = Query(default=20, ge=1, le=100)) -> dict:
     _cleanup_expired_files()
-    return [HistoryRecord(**record) for record in history_store.list()]
+    records = [HistoryRecord(**record) for record in history_store.list(limit=limit, offset=offset)]
+    total = history_store.count()
+    return {"records": records, "total": total, "offset": offset, "limit": limit}
 
 @app.get("/api/history/module-averages")
 def module_averages() -> dict[str, int]:
@@ -399,46 +398,6 @@ async def analyze_code(request: Request) -> CodeAnalyzeResponse:
     return result
 
 
-@app.post("/api/scam/analyze", response_model=ScamAnalyzeResponse)
-def analyze_scam(request: ScamAnalyzeRequest) -> ScamAnalyzeResponse:
-    """Archived compatibility endpoint. The frontend no longer displays this legacy module."""
-    text = request.text.strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="请输入需要分析的聊天文本。")
-
-    rules = [
-        ("索要验证码", r"验证码|短信码|校验码|动态码", 35, "high"),
-        ("诱导转账", r"转账|汇款|垫付|保证金|手续费|刷流水|解冻金|押金", 35, "high"),
-        ("高额回报", r"高额回报|稳赚|保本|返利|日结|佣金|中奖|补贴|奖学金|返现", 30, "high"),
-        ("催促决策", r"截止|逾期|马上|立即|最后\s*机会|今日.*失效|限时|名额有限", 20, "medium"),
-        ("脱离平台", r"加微信|加QQ|私聊|扫码进群|下载.*app|绕过平台|线下交易", 30, "high"),
-        ("隐瞒他人", r"不要告诉|别告诉|保密|悄悄|不要和.*说|只告诉你", 25, "medium"),
-        ("冒充身份", r"客服|老师|辅导员|学工|银行|公安|法院|平台审核", 20, "medium"),
-        ("可疑链接", r"https?://|点击链接|扫码|二维码|短链接|bit\.ly|tinyurl", 25, "medium"),
-        ("索要敏感资料", r"银行卡|身份证|密码|人脸|账号|支付密码|银行卡号", 30, "high"),
-    ]
-
-    reasons: list[TextFinding] = []
-    score = 0
-    for label, pattern, weight, level in rules:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if match:
-            score += weight
-            start = max(match.start() - 12, 0)
-            end = min(match.end() + 12, len(text))
-            reasons.append(TextFinding(label=label, evidence=text[start:end], riskLevel=level))
-
-    if not reasons:
-        reasons.append(TextFinding(label="未命中典型诈骗话术", evidence="未发现典型高危关键词。", riskLevel="low"))
-
-    risk_level = _level_from_score(score)
-    suggestions = {
-        "high": ["停止转账、提交验证码或填写银行卡。", "通过学校官网、辅导员或官方客服电话二次确认。", "保留聊天记录并向反诈或校园安全渠道反馈。"],
-        "medium": ["不要直接点击对方发送的链接。", "核对通知来源，优先使用学校或平台官方入口。", "涉及个人信息时先询问可信联系人。"],
-        "low": ["当前未发现明显诈骗特征。", "仍建议不要在聊天中发送验证码、密码、身份证或银行卡信息。"],
-    }[risk_level]
-
-    return ScamAnalyzeResponse(riskLevel=risk_level, score=min(score, 100), reasons=reasons, suggestions=suggestions)
 
 
 @app.post("/api/link/check", response_model=LinkCheckResponse)

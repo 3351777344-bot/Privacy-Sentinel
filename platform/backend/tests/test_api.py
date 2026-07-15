@@ -173,4 +173,6 @@ def test_non_privacy_history_can_be_persisted(tmp_path, monkeypatch) -> None:
     )
     assert response.status_code == 200
     assert response.json()["module"] == "code"
-    assert client.get("/api/history").json()[0]["module"] == "code"
+    data = client.get("/api/history").json()
+    assert data["records"][0]["module"] == "code"
+    assert data["total"] == 1

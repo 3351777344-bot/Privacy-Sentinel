@@ -115,6 +115,7 @@ class CodeAnalyzeResponse(BaseModel):
     suggestions: List[str]
     shouldSubmit: bool
     detectorSource: Literal["rule", "deepseek"] = "rule"
+    deepseekWarning: Optional[str] = None
 
 
 class ScamAnalyzeRequest(BaseModel):

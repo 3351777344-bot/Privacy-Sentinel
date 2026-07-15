@@ -82,6 +82,7 @@ export interface CodeAnalyzeResponse {
   suggestions: string[];
   shouldSubmit: boolean;
   detectorSource?: 'rule' | 'deepseek';
+  deepseekWarning?: string;
 }
 
 export interface LinkCheckItem {
@@ -120,6 +121,13 @@ export interface QrDecodeResponse {
   decodedTexts: string[];
   primaryText: string;
   message: string;
+}
+
+export interface PaginatedHistory {
+  records: HistoryRecord[];
+  total: number;
+  offset: number;
+  limit: number;
 }
 
 export interface DocCheckResponse {

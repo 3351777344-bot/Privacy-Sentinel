@@ -120,6 +120,9 @@ export default function CodePage(props: CodePageProps) {
               {props.result.detectorSource && <> · {DETECTOR_LABELS[props.result.detectorSource] ?? props.result.detectorSource}</>}
             </p>
           )}
+          {props.result?.deepseekWarning && (
+            <div className="deepseek-warning">{props.result.deepseekWarning}</div>
+          )}
           <div className="code-editor-wrapper">
             <div className="code-line-numbers" ref={linesRef}>
               {codeLines.map((_, idx) => (
