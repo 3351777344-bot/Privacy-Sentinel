@@ -1,4 +1,4 @@
-import { DecisionCard, PageHero } from '../components/PageComponents';
+import { DecisionCard, FileSummary, PageHero } from '../components/PageComponents';
 import { EvidenceList, RiskReport } from '../components/RiskComponents';
 import type { LinkCheckResponse, TextFinding } from '../types/privacy';
 
@@ -30,17 +30,27 @@ export default function LinkPage(props: LinkPageProps) {
       <div className="tool-grid">
         <section className="card form-card">
           <div className="section-title"><span>01</span><div><h3>链接安全体检</h3><p>输入 URL、短链接、二维码解析出的内容或链接来源说明。</p></div></div>
+          <div className="local-mode-banner"><strong>本地静态检查</strong><span>不访问目标地址，二维码也仅在本机解析</span></div>
           <input value={props.url} onChange={(event) => props.onUrlChange(event.target.value)} placeholder="https://example.com" aria-label="待检查链接" />
           <label className="field-label">链接来源
             <select value={props.source} onChange={(event) => props.onSourceChange(event.target.value)}>
               {sourceOptions.map((source) => <option key={source} value={source}>{source}</option>)}
             </select>
           </label>
-          <label className="upload-box doc-upload-box">
+          <label className={`upload-box doc-upload-box ${props.qrFile ? 'has-file' : ''}`}>
             <input aria-label="二维码图片" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void props.onQrUpload(event.target.files?.[0] ?? null)} />
-            <span className="upload-icon">+</span>
-            <strong>{props.loadingQr ? '二维码解析中...' : props.qrFile?.name ?? '选择二维码图片'}</strong>
-            <span>图片仅在本地解析，不会主动访问二维码中的链接。</span>
+            {props.qrFile ? (
+              <>
+                <FileSummary file={props.qrFile} label={props.loadingQr ? '正在本地解析' : '待解析二维码'} />
+                <span>点击可重新选择图片</span>
+              </>
+            ) : (
+              <>
+                <span className="upload-icon">+</span>
+                <strong>选择二维码图片</strong>
+                <span>图片仅在本地解析，不会主动访问二维码中的链接。</span>
+              </>
+            )}
           </label>
           {props.qrMessage && <p className="muted">{props.qrMessage}</p>}
           <button className="primary-button" disabled={props.loading || props.loadingQr || !props.url.trim()} onClick={props.onCheck}>

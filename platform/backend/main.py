@@ -244,8 +244,13 @@ def health() -> dict[str, str]:
 
 
 @app.post("/api/detect", response_model=DetectResponse)
-async def detect(file: UploadFile = File(...)) -> DetectResponse:
+async def detect(
+    file: UploadFile = File(...),
+    processing_mode: str = Form(default="local"),
+) -> DetectResponse:
     _cleanup_expired_files()
+    if processing_mode not in {"local", "online"}:
+        raise HTTPException(status_code=400, detail="处理模式仅支持 local 或 online。")
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="请上传图片文件。")
 
@@ -275,7 +280,12 @@ async def detect(file: UploadFile = File(...)) -> DetectResponse:
 
     original_url = f"/static/uploads/{saved_path.name}"
     try:
-        result = detect_privacy_items(str(saved_path), image_id, original_url)
+        result = detect_privacy_items(
+            str(saved_path),
+            image_id,
+            original_url,
+            processing_mode=processing_mode,
+        )
     except Exception:
         logger.exception("Privacy detector failed for image %s", image_id)
         saved_path.unlink(missing_ok=True)
@@ -362,12 +372,14 @@ async def analyze_code(request: Request) -> CodeAnalyzeResponse:
     content_type = request.headers.get("content-type", "")
     language: str | None = None
     filename: str | None = None
+    processing_mode = "local"
     code = ""
 
     if "multipart/form-data" in content_type:
         form = await request.form()
         language_value = form.get("language")
         language = str(language_value) if language_value is not None else None
+        processing_mode = str(form.get("processing_mode") or "local")
         upload = form.get("file")
         if upload is None or not hasattr(upload, "read"):
             raise HTTPException(status_code=400, detail="请上传单个代码文件。")
@@ -386,14 +398,24 @@ async def analyze_code(request: Request) -> CodeAnalyzeResponse:
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="JSON 请求体必须是对象。")
         language = payload.get("language")
+        processing_mode = str(payload.get("processingMode") or "local")
         code = str(payload.get("code") or "")
         if len(code.encode("utf-8")) > settings.max_code_bytes:
             raise HTTPException(status_code=413, detail="代码内容过大，最大允许 1 MB。")
 
     if not code.strip():
         raise HTTPException(status_code=400, detail="请输入或上传需要检测的代码。")
+    if processing_mode not in {"local", "online"}:
+        raise HTTPException(status_code=400, detail="处理模式仅支持 local 或 online。")
 
-    result = CodeAnalyzeResponse(**run_code_guardian(code=code, language=language, filename=filename))
+    result = CodeAnalyzeResponse(
+        **run_code_guardian(
+            code=code,
+            language=language,
+            filename=filename,
+            processing_mode=processing_mode,
+        )
+    )
     _append_analysis_history("code", result.riskLevel, result.score, result.summary, result_json=result.model_dump_json())
     return result
 

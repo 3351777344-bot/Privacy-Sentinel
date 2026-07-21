@@ -5,7 +5,7 @@ import { ImageCompareCard, PageHero } from '../components/PageComponents';
 import PrivacyItemList from '../components/PrivacyItemList';
 import RiskSummary from '../components/RiskSummary';
 import UploadPanel from '../components/UploadPanel';
-import type { DetectResult, MaskType } from '../types/privacy';
+import type { DetectResult, MaskType, ProcessingMode } from '../types/privacy';
 
 interface PrivacyPageProps {
   result: DetectResult | null;
@@ -13,8 +13,10 @@ interface PrivacyPageProps {
   loadingDetect: boolean;
   loadingMask: boolean;
   maskType: MaskType;
+  processingMode: ProcessingMode;
   onBack: () => void;
   onDetect: (file: File) => Promise<void>;
+  onProcessingModeChange: (mode: ProcessingMode) => void;
   onMaskTypeChange: (type: MaskType) => void;
   onProcess: (scope: 'high' | 'all' | 'custom', selectedIds?: string[]) => Promise<void>;
 }
@@ -31,7 +33,12 @@ export default function PrivacyPage(props: PrivacyPageProps) {
       />
       <div className="workflow-grid">
         <div className="left-column">
-          <UploadPanel loading={loadingDetect} onDetect={props.onDetect} />
+          <UploadPanel
+            loading={loadingDetect}
+            onDetect={props.onDetect}
+            processingMode={props.processingMode}
+            onProcessingModeChange={props.onProcessingModeChange}
+          />
           <ImagePreview
             imageUrl={toAssetUrl(result?.originalImageUrl)}
             items={result?.items}

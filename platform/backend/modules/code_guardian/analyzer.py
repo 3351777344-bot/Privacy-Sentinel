@@ -5,20 +5,34 @@ from .report_generator import build_report
 from .rules import iter_findings
 
 
-def _deepseek_analyze(code: str, language: str) -> tuple[list[dict], str | None]:
+def _deepseek_analyze(code: str, language: str) -> tuple[list[dict], str | None, bool]:
+    """Return (findings, warning, used_deepseek).
+
+    ``used_deepseek`` is True only when DeepSeek was actually reached, so the
+    caller can tell a genuine "no extra issues found" result apart from an API
+    failure and avoid showing a misleading "check your API config" warning.
+    """
     from .llm_analyzer import analyze_with_deepseek
 
+    if not (settings.deepseek_enabled and settings.deepseek_api_key):
+        return [], "DeepSeek 联网增强未启用，当前仅显示本地规则检测结果。", False
+
     try:
-        findings = analyze_with_deepseek(code, language)
-        if not findings and (settings.deepseek_enabled and settings.deepseek_api_key):
-            # DeepSeek was configured but returned nothing (likely API error)
-            return [], "DeepSeek AI 分析返回为空，仅显示本地规则检测结果。请检查 API 配置或网络连接。"
-        return findings, None
+        findings, error = analyze_with_deepseek(code, language)
     except Exception:
-        return [], "DeepSeek AI 分析不可用，仅显示本地规则检测结果。"
+        return [], "DeepSeek AI 调用异常，已回退本地规则检测结果。", False
+
+    if error:
+        return findings, error, False
+    return findings, None, True
 
 
-def analyze_code(code: str, language: str | None = None, filename: str | None = None) -> dict:
+def analyze_code(
+    code: str,
+    language: str | None = None,
+    filename: str | None = None,
+    processing_mode: str | None = None,
+) -> dict:
     detection = detect_language(code or "", language, filename)
     detected_lang = detection.language
 
@@ -26,8 +40,14 @@ def analyze_code(code: str, language: str | None = None, filename: str | None = 
     detector_source = "rule"
     deepseek_warning: str | None = None
 
-    if settings.code_engine == "deepseek":
-        deepseek_findings, deepseek_warning = _deepseek_analyze(code or "", detected_lang)
+    engine = "rule" if processing_mode == "local" else settings.code_engine
+    if processing_mode == "online":
+        engine = "deepseek"
+
+    if engine == "deepseek":
+        deepseek_findings, deepseek_warning, used_deepseek = _deepseek_analyze(code or "", detected_lang)
+        if used_deepseek:
+            detector_source = "deepseek"
         if deepseek_findings:
             seen = {(f.get("type"), f.get("line")) for f in local_findings}
             for df in deepseek_findings:
@@ -35,7 +55,6 @@ def analyze_code(code: str, language: str | None = None, filename: str | None = 
                 if key not in seen:
                     local_findings.append(df)
                     seen.add(key)
-            detector_source = "deepseek"
 
     result = build_report(detection, local_findings)
     result["detectorSource"] = detector_source

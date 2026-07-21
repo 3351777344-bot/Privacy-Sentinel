@@ -2215,7 +2215,6 @@ body {
 
 .history-stats .stat-row.processed b { color: #059669; }
 .history-stats .stat-row.pending  b { color: #d97706; }
-*/
 
 /* ── Filter Card ── */
 .history-filter .filter-title {
@@ -2421,15 +2420,28 @@ body {
 /* ── Code Editor + Highlighting ── */
 .code-editor-wrapper {
   display: flex;
+  align-items: stretch;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   overflow: hidden;
   margin-top: 8px;
+  max-height: min(56vh, 440px);
 }
 
 .code-editor-wrapper.compact {
   max-height: 320px;
   overflow: auto;
+}
+
+.code-editor-wrapper .code-line-numbers {
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.code-editor-wrapper .code-textarea {
+  max-height: 100%;
+  overflow: auto;
+  resize: none;
 }
 
 .code-line-numbers {
@@ -2591,4 +2603,268 @@ body {
 .delete-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Stable file-import layouts and explicit processing modes */
+.workspace,
+.workflow-grid > *,
+.tool-grid > *,
+.doc-tool-grid > *,
+.card,
+.section-title > div {
+  min-width: 0;
+}
+
+.processing-mode {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0 0 8px;
+}
+
+.processing-mode button {
+  background: #f8fafc;
+  border: 1px solid #d8e3ef;
+  border-radius: 8px;
+  color: #475569;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 11px 12px;
+  text-align: left;
+}
+
+.processing-mode button.selected {
+  background: #eff6ff;
+  border-color: #2563eb;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
+
+.processing-mode button strong {
+  font-size: 13px;
+}
+
+.processing-mode button span {
+  color: #718096;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.mode-note {
+  background: #f8fafc;
+  border-left: 3px solid #60a5fa;
+  color: #5b687b;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+}
+
+.local-mode-banner {
+  align-items: center;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-bottom: 12px;
+  padding: 9px 11px;
+}
+
+.local-mode-banner strong {
+  color: #15803d;
+  font-size: 12px;
+}
+
+.local-mode-banner span {
+  color: #587063;
+  font-size: 11px;
+}
+
+.upload-box {
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+}
+
+.upload-box.has-file {
+  align-items: stretch;
+  gap: 8px;
+  justify-items: stretch;
+  min-height: 0;
+  padding: 13px;
+  text-align: left;
+}
+
+.upload-box.has-file > span:last-child {
+  padding-left: 42px;
+}
+
+.selected-file-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+  max-height: 240px;
+  min-width: 0;
+  overflow: auto;
+}
+
+.selected-file {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #dce5ee;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  max-width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  width: 100%;
+}
+
+.selected-file-list .selected-file {
+  grid-template-columns: 30px minmax(0, 1fr) auto 28px;
+}
+
+.selected-file-icon {
+  align-items: center;
+  background: #eaf2ff;
+  border-radius: 6px;
+  color: #2563eb;
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.selected-file > div {
+  display: grid;
+  min-width: 0;
+}
+
+.selected-file small {
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.selected-file strong {
+  color: #25344b;
+  display: block;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-file-size {
+  color: #718096 !important;
+  font-size: 11px !important;
+  white-space: nowrap;
+}
+
+.remove-file {
+  align-items: center;
+  background: #f1f5f9;
+  border-radius: 50%;
+  color: #64748b;
+  display: inline-flex;
+  font-size: 17px;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  width: 26px;
+}
+
+.remove-file:hover {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.image-stage.has-image {
+  min-height: 240px;
+  max-height: 560px;
+  padding: 12px;
+}
+
+.image-stage.has-image img {
+  height: auto;
+  max-height: 536px;
+  max-width: 100%;
+  width: auto;
+}
+
+.detail-card .section-title p,
+.finding-item,
+.privacy-item,
+.report-card-summary,
+.uploaded-files,
+.parsed-requirements {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.code-editor-wrapper,
+.code-textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 560px) {
+  .processing-mode {
+    grid-template-columns: 1fr;
+  }
+
+  .selected-file,
+  .selected-file-list .selected-file {
+    grid-template-columns: 28px minmax(0, 1fr) 26px;
+  }
+
+  .selected-file-size {
+    display: none;
+  }
+}
+
+/* Bound growable content so no single card balloons after import/detection.
+   Long lists scroll inside a capped area instead of stretching the module. */
+.privacy-list,
+.custom-mask-list,
+.vuln-select-list {
+  max-height: 340px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.result-card .finding-list,
+.detail-card .finding-list {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.doc-check-group .finding-list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.uploaded-files {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.uploaded-files h4 {
+  position: sticky;
+  top: 0;
+  background: #f8fafc;
+  padding-bottom: 6px;
+  z-index: 1;
+}
+
+/* Fixed-code output must not stretch its card either. */
+.code-preview {
+  max-height: min(56vh, 440px);
 }

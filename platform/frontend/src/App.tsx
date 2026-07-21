@@ -27,6 +27,7 @@ import type {
   LinkCheckResponse,
   MaskType,
   PaginatedHistory,
+  ProcessingMode,
   RiskLevel
 } from './types/privacy';
 import { calculateOverallScore } from './utils/scoring';
@@ -91,6 +92,7 @@ export default function App() {
   const [moduleAverages, setModuleAverages] = useState<Record<string, number>>({});
   const [maskType, setMaskType] = useState<MaskType>('black');
   const [loadingDetect, setLoadingDetect] = useState(false);
+  const [privacyProcessingMode, setPrivacyProcessingMode] = useState<ProcessingMode>('local');
   const [loadingMask, setLoadingMask] = useState(false);
   const [error, setError] = useState('');
 
@@ -99,6 +101,7 @@ export default function App() {
   const [codeFile, setCodeFile] = useState<File | null>(null);
   const [codeResult, setCodeResult] = useState<CodeAnalyzeResponse | null>(null);
   const [loadingCode, setLoadingCode] = useState(false);
+  const [codeProcessingMode, setCodeProcessingMode] = useState<ProcessingMode>('local');
 
   const [url, setUrl] = useState('https://example.com/login?redirect=pay&token=abc123abc123abc123abc123');
   const [linkSource, setLinkSource] = useState('短信');
@@ -206,7 +209,7 @@ export default function App() {
     setError('');
     setProcessedUrl('');
     try {
-      const result = await detectImage(file);
+      const result = await detectImage(file, privacyProcessingMode);
       setDetectResult(result);
       await refreshHistory();
     } catch (err) {
@@ -242,7 +245,12 @@ export default function App() {
     setLoadingCode(true);
     setError('');
     try {
-      const result = await analyzeCode(codeLanguage, codeText || await (codeFile?.text() ?? ''), codeFile);
+      const result = await analyzeCode(
+        codeLanguage,
+        codeText || await (codeFile?.text() ?? ''),
+        codeProcessingMode,
+        codeFile
+      );
       setCodeResult(result);
       await refreshHistory();
     } catch (err) {
@@ -329,6 +337,10 @@ export default function App() {
   }
 
   async function handleCodeFix(items: Array<{type: string, title: string, line?: number | null, snippet: string}>) {
+    if (codeProcessingMode !== 'online') {
+      setError('代码修复需要联网调用模型，请先选择“联网增强”模式。');
+      return;
+    }
     setLoadingFix(true);
     setError('');
     try {
@@ -382,10 +394,10 @@ export default function App() {
           <button onClick={openHistory}><span className="nav-glyph">◷</span><span>历史记录</span></button>
         </div>
         <div className="local-promise">
-          <strong>本地防护 · 安心可控</strong>
-          <p>✓ 本地可解释规则检测</p>
-          <p>✓ 材料不出本地设备</p>
-          <p>✓ 不调用第三方模型 API</p>
+          <strong>本地优先 · 联网可选</strong>
+          <p>✓ 默认使用本地可解释规则</p>
+          <p>✓ 图片与代码可选联网增强</p>
+          <p>✓ 联网前明确提示，失败自动回退</p>
         </div>
         <small className="version-dot">● GuardianHub v0.1.0</small>
       </aside>
@@ -394,9 +406,9 @@ export default function App() {
         <header className="top-nav">
           <div>
             <p>GuardianHub 安全中心</p>
-            <strong>{page === 'home' ? '面向高校场景的本地数字安全防护平台' : modules.find((item) => item.id === page)?.title}</strong>
+            <strong>{page === 'home' ? '面向高校场景的可控数字安全防护平台' : modules.find((item) => item.id === page)?.title}</strong>
           </div>
-          <div className="top-status"><span>◆</span> Local-Only / 本地处理</div>
+          <div className="top-status"><span>◆</span> Local First / 本地优先</div>
         </header>
 
         <div className="workspace">
@@ -448,7 +460,7 @@ export default function App() {
                           <div className="mini-score"><small>最近评分</small><strong>{status.score}</strong><span>/ 100</span></div>
                         </div>
                         <div className="dashboard-module-footer">
-                          <span>本地规则检测</span>
+                          <span>{module.id === 'privacy' || module.id === 'code' ? '本地处理 / 联网增强可选' : '本地静态检测'}</span>
                           <button onClick={() => setPage(module.id)}>开始检测 <b>→</b></button>
                         </div>
                       </article>
@@ -475,10 +487,10 @@ export default function App() {
                       <div className="distribution-legend"><p><i className="high" /> high <b>{riskCounts.high}</b></p><p><i className="medium" /> medium <b>{riskCounts.medium}</b></p><p><i className="low" /> low <b>{riskCounts.low}</b></p></div>
                     </div>
                   </section>
-                  <section className="card privacy-note"><strong>◆ 安全与隐私承诺</strong><p>检测基于本地可解释规则完成，上传材料不会发送至第三方模型服务。</p></section>
+                  <section className="card privacy-note"><strong>◆ 安全与隐私说明</strong><p>默认采用本地处理。仅当你主动选择联网增强时，相关图片或代码才会发送至已配置的模型服务；链接与提交材料始终本地检查。</p></section>
                 </aside>
               </div>
-              <footer className="rules-footer"><span>◇ 检测基于本地可解释规则引擎</span><span>当前历史记录：{mergedHistory.length} 条</span></footer>
+              <footer className="rules-footer"><span>◇ 本地规则为基础，可按需选择联网增强</span><span>当前历史记录：{mergedHistory.length} 条</span></footer>
             </div>
           )}
 
@@ -489,9 +501,11 @@ export default function App() {
           loadingDetect={loadingDetect}
           loadingMask={loadingMask}
           maskType={maskType}
+          processingMode={privacyProcessingMode}
           onBack={() => setPage('home')}
           onDetect={handleDetect}
           onMaskTypeChange={setMaskType}
+          onProcessingModeChange={setPrivacyProcessingMode}
           onProcess={handleMask}
         />
       )}
@@ -505,9 +519,14 @@ export default function App() {
           loading={loadingCode}
           fixedCode={fixedCode}
           loadingFix={loadingFix}
+          processingMode={codeProcessingMode}
           onBack={() => setPage('home')}
           onTextChange={setCodeText}
           onLanguageChange={setCodeLanguage}
+          onProcessingModeChange={(mode) => {
+            setCodeProcessingMode(mode);
+            setFixedCode(null);
+          }}
           onFileChange={setCodeFile}
           onAnalyze={handleCodeAnalyze}
           onFix={handleCodeFix}

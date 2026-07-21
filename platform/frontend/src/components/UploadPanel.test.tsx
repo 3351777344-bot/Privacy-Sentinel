@@ -13,13 +13,14 @@ describe('UploadPanel', () => {
 
   it('renders upload box and detect button', () => {
     render(<UploadPanel loading={false} onDetect={onDetect} />);
-    expect(screen.getByText(/点击选择本地图片/)).not.toBeNull();
-    expect(screen.getByText('开始隐私检测')).not.toBeNull();
+    expect(screen.getByText(/点击选择图片/)).not.toBeNull();
+    expect(screen.getByText('开始本地检测')).not.toBeNull();
+    expect(screen.getByText('联网增强')).not.toBeNull();
   });
 
   it('disables detect button when no file selected', () => {
     render(<UploadPanel loading={false} onDetect={onDetect} />);
-    const button = screen.getByText('开始隐私检测').closest('button');
+    const button = screen.getByText('开始本地检测').closest('button');
     expect(button?.disabled).toBe(true);
   });
 
@@ -33,7 +34,7 @@ describe('UploadPanel', () => {
     await user.upload(input, file);
 
     expect(screen.getByText(/不支持的文件格式/)).not.toBeNull();
-    const button = screen.getByText('开始隐私检测').closest('button');
+    const button = screen.getByText('开始本地检测').closest('button');
     expect(button?.disabled).toBe(true);
   });
 
@@ -47,8 +48,8 @@ describe('UploadPanel', () => {
     const input = screen.getByLabelText('选择图片文件');
     await user.upload(input, file);
 
-    expect(screen.getByText(/超过/)).not.toBeNull();
-    const button = screen.getByText('开始隐私检测').closest('button');
+    expect(screen.getByText(/文件过大/)).not.toBeNull();
+    const button = screen.getByText('开始本地检测').closest('button');
     expect(button?.disabled).toBe(true);
   });
 
@@ -77,7 +78,7 @@ describe('UploadPanel', () => {
     const input = screen.getByLabelText('选择图片文件');
     await user.upload(input, file);
 
-    const button = screen.getByText('开始隐私检测').closest('button');
+    const button = screen.getByText('开始本地检测').closest('button');
     expect(button?.disabled).toBe(false);
   });
 });

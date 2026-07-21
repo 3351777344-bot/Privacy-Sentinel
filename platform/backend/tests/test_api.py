@@ -95,7 +95,12 @@ def test_valid_image_uses_detector_and_persists_history(tmp_path, monkeypatch) -
     monkeypatch.setattr(main, "DETECTION_DIR", detections)
     monkeypatch.setattr(main, "history_store", HistoryStore(tmp_path / "history.db"))
 
-    def fake_detector(path: str, image_id: str, original_url: str) -> DetectResponse:
+    def fake_detector(
+        path: str,
+        image_id: str,
+        original_url: str,
+        processing_mode: str | None = None,
+    ) -> DetectResponse:
         return DetectResponse(
             imageId=image_id,
             originalImageUrl=original_url,

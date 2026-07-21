@@ -1,5 +1,6 @@
 export type RiskLevel = 'high' | 'medium' | 'low';
 export type MaskType = 'black' | 'blur' | 'mosaic';
+export type ProcessingMode = 'local' | 'online';
 
 export interface Box {
   x: number;

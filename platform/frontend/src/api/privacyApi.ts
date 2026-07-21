@@ -6,6 +6,7 @@ import type {
   LinkCheckResponse,
   MaskResponse,
   MaskType,
+  ProcessingMode,
   QrDecodeResponse
 } from '../types/privacy';
 
@@ -37,9 +38,10 @@ export function toAssetUrl(url?: string | null): string {
   return url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
 }
 
-export async function detectImage(file: File): Promise<DetectResult> {
+export async function detectImage(file: File, processingMode: ProcessingMode): Promise<DetectResult> {
   const formData = new FormData();
   formData.append('file', file);
+  formData.append('processing_mode', processingMode);
   const response = await fetchWithTimeout(`${API_BASE_URL}/api/detect`, {
     method: 'POST',
     body: formData
@@ -86,10 +88,16 @@ export async function deleteHistoryRecord(recordId: string): Promise<void> {
   }
 }
 
-export async function analyzeCode(language: string, code: string, file?: File | null): Promise<CodeAnalyzeResponse> {
+export async function analyzeCode(
+  language: string,
+  code: string,
+  processingMode: ProcessingMode,
+  file?: File | null
+): Promise<CodeAnalyzeResponse> {
   if (file) {
     const formData = new FormData();
     formData.append('language', language);
+    formData.append('processing_mode', processingMode);
     formData.append('file', file);
     const response = await fetchWithTimeout(`${API_BASE_URL}/api/code/analyze`, {
       method: 'POST',
@@ -101,7 +109,7 @@ export async function analyzeCode(language: string, code: string, file?: File | 
   const response = await fetchWithTimeout(`${API_BASE_URL}/api/code/analyze`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ language, code })
+    body: JSON.stringify({ language, code, processingMode })
   });
   return parseResponse<CodeAnalyzeResponse>(response);
 }

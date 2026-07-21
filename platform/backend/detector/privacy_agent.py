@@ -23,25 +23,23 @@ MASK_BY_TYPE = {
 }
 
 
-def _default_item_source(item: PrivacyItem) -> str:
+def _default_item_source(item: PrivacyItem, engine: str | None = None) -> str:
     if item.type == "qr_code":
         return "qr"
     if item.type == "face":
         return "face"
     if settings.demo_mode:
         return "demo"
-    if settings.privacy_engine == "vision_api" and settings.qwen_enabled:
-        return "vision_api"
     return "ocr"
 
 
-def _enrich_item(item: PrivacyItem) -> PrivacyItem:
+def _enrich_item(item: PrivacyItem, engine: str | None = None) -> PrivacyItem:
     recommended_mask = MASK_BY_TYPE.get(item.type, settings.default_mask_type)
     if recommended_mask not in {"black", "blur", "mosaic"}:
         recommended_mask = "mosaic"
     return item.model_copy(
         update={
-            "source": _default_item_source(item),
+            "source": _default_item_source(item, engine),
             "recommendedMaskType": recommended_mask,
             "confidence": item.confidence if item.confidence is not None else 1.0,
         }
@@ -100,12 +98,21 @@ def _detect_faces(image_path: str, image_width: int, image_height: int, image_id
         return []
 
 
-def detect_privacy_items(image_path: str, image_id: str, original_url: str) -> DetectResponse:
+def detect_privacy_items(
+    image_path: str,
+    image_id: str,
+    original_url: str,
+    processing_mode: str | None = None,
+) -> DetectResponse:
     base_result = detect_with_local_rules(image_path, image_id, original_url)
     engine = settings.privacy_engine
+    if processing_mode == "local":
+        engine = "agent"
+    elif processing_mode == "online":
+        engine = "hybrid"
 
     if engine not in {"agent", "hybrid", "vision_api"} or settings.demo_mode:
-        return base_result.model_copy(update={"items": [_enrich_item(item) for item in base_result.items]})
+        return base_result.model_copy(update={"items": [_enrich_item(item, engine) for item in base_result.items]})
 
     with Image.open(image_path) as image:
         width, height = image.size

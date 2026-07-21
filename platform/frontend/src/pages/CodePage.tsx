@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { DecisionCard, PageHero } from '../components/PageComponents';
+import { DecisionCard, FileSummary, PageHero, ProcessingModeSelector } from '../components/PageComponents';
 import { RiskBadge, RiskReport } from '../components/RiskComponents';
-import type { CodeAnalyzeResponse, CodeVulnerability, TextFinding } from '../types/privacy';
+import type { CodeAnalyzeResponse, CodeVulnerability, ProcessingMode, TextFinding } from '../types/privacy';
 
 const languageOptions = [
   { value: 'auto', label: '自动识别' },
@@ -21,9 +21,11 @@ interface CodePageProps {
   loading: boolean;
   fixedCode: string | null;
   loadingFix: boolean;
+  processingMode: ProcessingMode;
   onBack: () => void;
   onTextChange: (value: string) => void;
   onLanguageChange: (value: string) => void;
+  onProcessingModeChange: (mode: ProcessingMode) => void;
   onFileChange: (file: File | null) => void;
   onAnalyze: () => Promise<void>;
   onFix: (items: Array<{type: string, title: string, line?: number | null, snippet: string}>) => Promise<void>;
@@ -98,7 +100,7 @@ export default function CodePage(props: CodePageProps) {
 
   return (
     <>
-      <PageHero eyebrow="Code Guardian" title="Code Guardian 代码卫士" copy="提交代码之前，先检查潜在安全风险。AI 辅助检测并修复漏洞。" onBack={props.onBack} />
+      <PageHero eyebrow="Code Guardian" title="Code Guardian 代码卫士" copy="提交代码之前先检查潜在风险；可选择纯本地规则或联网 AI 增强。" onBack={props.onBack} />
       <div className="tool-grid">
         <section className="card form-card">
           <div className="section-title">
@@ -114,6 +116,12 @@ export default function CodePage(props: CodePageProps) {
               {languageOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
+          <ProcessingModeSelector value={props.processingMode} onChange={props.onProcessingModeChange} />
+          <p className="mode-note">
+            {props.processingMode === 'local'
+              ? '本地模式：仅运行本地语言识别与安全规则，代码不会离开当前设备。'
+              : '联网模式：本地规则结果将由 DeepSeek 增强分析；未配置或调用失败时自动回退本地规则。'}
+          </p>
           {props.result && (
             <p className="muted">
               识别语言：{props.result.language}（{props.result.languageSource}，{Math.round(props.result.languageConfidence * 100)}%）
@@ -138,7 +146,7 @@ export default function CodePage(props: CodePageProps) {
               placeholder="在此粘贴代码…"
             />
           </div>
-          <label className="upload-box doc-upload-box">
+          <label className={`upload-box doc-upload-box ${props.file ? 'has-file' : ''}`}>
             <input type="file" accept=".py,.java,.js,.ts,.sql,.txt,.zip" onChange={(event) => {
               const f = event.target.files?.[0] ?? null;
               if (f && !f.name.toLowerCase().endsWith('.zip')) {
@@ -146,9 +154,18 @@ export default function CodePage(props: CodePageProps) {
               }
               props.onFileChange(f);
             }} />
-            <span className="upload-icon">+</span>
-            <strong>{props.file ? props.file.name : '选择单个代码文件'}</strong>
-            <span>.py / .java / .js / .ts / .sql / .txt</span>
+            {props.file ? (
+              <>
+                <FileSummary file={props.file} label="待检测代码" />
+                <span>点击可重新选择文件</span>
+              </>
+            ) : (
+              <>
+                <span className="upload-icon">+</span>
+                <strong>选择单个代码文件</strong>
+                <span>.py / .java / .js / .ts / .sql / .txt</span>
+              </>
+            )}
           </label>
           {props.file?.name.toLowerCase().endsWith('.zip') && <p className="muted">暂不支持 zip 项目包，请上传单个文件或粘贴代码。</p>}
           <button className="primary-button" disabled={props.loading || (!props.text.trim() && !props.file)} onClick={props.onAnalyze}>
@@ -166,7 +183,7 @@ export default function CodePage(props: CodePageProps) {
             suggestions={props.result?.suggestions}
           />
 
-          {props.result && vulns.length > 0 && (
+          {props.processingMode === 'online' && props.result && vulns.length > 0 && (
             <section className="card result-card">
               <div className="section-title">
                 <span>F</span>
