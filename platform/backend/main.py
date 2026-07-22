@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -280,11 +281,14 @@ async def detect(
 
     original_url = f"/static/uploads/{saved_path.name}"
     try:
-        result = detect_privacy_items(
+        # Run CPU/network-bound detection off the event loop so local requests
+        # are not blocked behind a slow online (Qwen) call.
+        result = await asyncio.to_thread(
+            detect_privacy_items,
             str(saved_path),
             image_id,
             original_url,
-            processing_mode=processing_mode,
+            processing_mode,
         )
     except Exception:
         logger.exception("Privacy detector failed for image %s", image_id)

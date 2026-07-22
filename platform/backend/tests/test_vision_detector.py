@@ -14,6 +14,9 @@ def _settings(*, enabled: bool = True, api_key: str = "test-key") -> SimpleNames
         qwen_api_key=api_key,
         qwen_api_base="https://example.invalid/v1",
         qwen_model="test-vision-model",
+        qwen_timeout_seconds=35,
+        qwen_image_max_side=1280,
+        qwen_max_tokens=1536,
     )
 
 
@@ -55,6 +58,17 @@ def test_type_and_box_normalization() -> None:
 
     box = vision_detector._normalized_to_pixel([-20, 100, 1200, 900], 200, 100)
     assert box == Box(x=0, y=10, width=200, height=80)
+
+    rotated = vision_detector._box_from_rotate_rect([500, 500, 100, 40, 90], 200, 100)
+    assert rotated.x >= 0 and rotated.y >= 0
+    assert rotated.width >= 1 and rotated.height >= 1
+
+    fenced = vision_detector._extract_json_payload('```json\n[{"text":"13812345678","rotate_rect":[100,200,50,20,0]}]\n```')
+    assert isinstance(fenced, list)
+    assert fenced[0]["text"] == "13812345678"
+
+    raw_items = vision_detector._ocr_payload_to_raw_items(fenced)
+    assert any(item["type"] == "phone" for item in raw_items)
 
 
 def test_image_encoding_and_qwen_item_parsing(tmp_path) -> None:

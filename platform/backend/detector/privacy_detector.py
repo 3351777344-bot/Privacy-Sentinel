@@ -14,6 +14,7 @@ from .mock_detector import detect_privacy_items as detect_demo_items
 
 
 OCR_CONFIDENCE_THRESHOLD = 0.55
+OCR_MAX_SIDE = 1600
 _OCR_LOCK = Lock()
 
 PRIVACY_PATTERNS = [
@@ -24,6 +25,7 @@ PRIVACY_PATTERNS = [
     ("student_id", "学号", re.compile(r"(?:学号|student\s*id)\s*[:：]?\s*[A-Z0-9_-]{6,}", re.IGNORECASE), "medium", "学号可关联校内身份，公开分享前建议遮盖。"),
     ("order_no", "订单号", re.compile(r"(?:订单号?|order(?:\s*id)?)\s*[:：#-]?\s*[A-Z0-9_-]{6,}", re.IGNORECASE), "medium", "订单号可能被用于查询交易信息，建议按分享对象决定是否隐藏。"),
     ("address", "详细地址", re.compile(r"(?:住址|地址|收货地址)\s*[:：]?[^\n]{4,}|[\u4e00-\u9fff]{2,}(?:省|市|区|县)[^\n]{2,}(?:路|街|巷|号|楼|室)"), "high", "详细地址可能暴露住址或活动范围，建议完整打码。"),
+    ("qr_code", "二维码", re.compile(r"二维码|QR\s*码|QR\s*code", re.IGNORECASE), "high", "二维码可能包含账号、订单或跳转信息，建议遮挡或确认内容后再分享。"),
 ]
 
 
@@ -44,6 +46,18 @@ def _box_from_points(points: Any, image_width: int, image_height: int, padding: 
     return Box(x=left, y=top, width=max(1, right - left), height=max(1, bottom - top))
 
 
+def _expand_qr_label_box(box: Box, image_width: int, image_height: int) -> Box:
+    """OCR often only hits the '二维码' caption; expand to cover the code graphic below/beside it."""
+    side = max(box.width, box.height, 96)
+    side = min(side * 4, max(160, image_width // 3), max(160, image_height // 3))
+    left = min(box.x, max(0, image_width - side))
+    # Prefer extending downward from the caption.
+    top = box.y
+    if top + side > image_height:
+        top = max(0, image_height - side)
+    return Box(x=left, y=top, width=side, height=side)
+
+
 def _redact_text(value: str, finding_type: str) -> str:
     compact = re.sub(r"\s+", "", value)
     if finding_type == "phone" and len(compact) >= 7:
@@ -55,6 +69,8 @@ def _redact_text(value: str, finding_type: str) -> str:
         return f"{local[:2]}***@{domain}"
     if finding_type == "address":
         return "已识别到详细地址"
+    if finding_type == "qr_code":
+        return "二维码内容已隐藏"
     return compact[:4] + "****" if len(compact) > 4 else "****"
 
 
@@ -69,6 +85,9 @@ def findings_from_ocr(
             match = pattern.search(text)
             if not match:
                 continue
+            box = _box_from_points(points, image_width, image_height)
+            if finding_type == "qr_code":
+                box = _expand_qr_label_box(box, image_width, image_height)
             items.append(
                 PrivacyItem(
                     id=f"{image_id}_{finding_type}_{len(items) + 1}",
@@ -76,11 +95,29 @@ def findings_from_ocr(
                     label=label,
                     text=_redact_text(match.group(0), finding_type),
                     riskLevel=risk_level,
-                    box=_box_from_points(points, image_width, image_height),
+                    box=box,
                     suggestion=suggestion,
                 )
             )
     return items
+
+
+def _iter_qr_point_sets(points: Any) -> list[Any]:
+    if points is None:
+        return []
+    try:
+        import numpy as np
+
+        arr = np.asarray(points)
+        if arr.ndim == 2 and arr.shape[-1] == 2:
+            return [arr]
+        if arr.ndim == 3 and arr.shape[-1] == 2:
+            return [arr[index] for index in range(arr.shape[0])]
+    except Exception:
+        pass
+    if isinstance(points, (list, tuple)):
+        return list(points)
+    return []
 
 
 def _detect_qr_codes(image_path: str, image_width: int, image_height: int, image_id: str) -> list[PrivacyItem]:
@@ -92,18 +129,66 @@ def _detect_qr_codes(image_path: str, image_width: int, image_height: int, image
         image = cv2.imdecode(image_bytes, cv2.IMREAD_COLOR)
         if image is None:
             return []
+
         detector = cv2.QRCodeDetector()
-        qr_points: list[Any] = []
-        try:
-            detected, _decoded, points, _straight = detector.detectAndDecodeMulti(image)
-            if detected and points is not None:
-                qr_points.extend(points)
-        except (AttributeError, cv2.error):
-            pass
-        if not qr_points:
-            _decoded, points, _straight = detector.detectAndDecode(image)
-            if points is not None:
-                qr_points.append(points[0] if len(points) == 1 else points)
+        candidates: list[tuple[Any, float, float, int, int]] = []
+
+        def consider(view, scale_x: float, scale_y: float, offset_x: int = 0, offset_y: int = 0) -> None:
+            try:
+                found, points = detector.detect(view)
+                if found:
+                    for pts in _iter_qr_point_sets(points):
+                        candidates.append((pts, scale_x, scale_y, offset_x, offset_y))
+            except (AttributeError, cv2.error):
+                pass
+            try:
+                detected, _values, points, _straight = detector.detectAndDecodeMulti(view)
+                if detected or points is not None:
+                    for pts in _iter_qr_point_sets(points):
+                        candidates.append((pts, scale_x, scale_y, offset_x, offset_y))
+            except (AttributeError, cv2.error):
+                pass
+            try:
+                _value, points, _straight = detector.detectAndDecode(view)
+                for pts in _iter_qr_point_sets(points):
+                    candidates.append((pts, scale_x, scale_y, offset_x, offset_y))
+            except (AttributeError, cv2.error):
+                pass
+
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        consider(image, 1.0, 1.0)
+        consider(gray, 1.0, 1.0)
+
+        # Screenshots / tiny codes: upscale and add quiet-zone border, then map points back.
+        if not candidates:
+            scale = max(2, min(6, 240 // max(1, min(image.shape[:2]))))
+            enlarged = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
+            border = 8 * scale
+            bordered = cv2.copyMakeBorder(
+                enlarged, border, border, border, border, cv2.BORDER_CONSTANT, value=(255, 255, 255)
+            )
+            consider(bordered, 1.0 / scale, 1.0 / scale, -border, -border)
+
+        qr_boxes: list[Box] = []
+        for pts, scale_x, scale_y, offset_x, offset_y in candidates:
+            mapped = []
+            for point in pts:
+                x = (float(point[0]) + offset_x) * scale_x
+                y = (float(point[1]) + offset_y) * scale_y
+                mapped.append([x, y])
+            box = _box_from_points(mapped, image_width, image_height, padding=8)
+            if box.width < 12 or box.height < 12:
+                continue
+            # Deduplicate heavily overlapping detections.
+            if any(
+                abs(box.x - existing.x) < 12
+                and abs(box.y - existing.y) < 12
+                and abs(box.width - existing.width) < 24
+                and abs(box.height - existing.height) < 24
+                for existing in qr_boxes
+            ):
+                continue
+            qr_boxes.append(box)
 
         return [
             PrivacyItem(
@@ -112,13 +197,45 @@ def _detect_qr_codes(image_path: str, image_width: int, image_height: int, image
                 label="二维码",
                 text="二维码内容已隐藏",
                 riskLevel="high",
-                box=_box_from_points(points, image_width, image_height, padding=8),
+                box=box,
                 suggestion="二维码可能包含账号、订单或跳转信息，建议遮挡或确认内容后再分享。",
             )
-            for index, points in enumerate(qr_points, start=1)
+            for index, box in enumerate(qr_boxes, start=1)
         ]
-    except (ImportError, RuntimeError):
+    except (ImportError, RuntimeError, ValueError):
         return []
+
+
+def _run_ocr(image_path: str, image_width: int, image_height: int) -> tuple[list[str], list[Any], list[float]]:
+    """Run RapidOCR, downscaling very large images first to cut latency."""
+    import numpy as np
+
+    scale = 1.0
+    ocr_input: Any = str(Path(image_path))
+    longest = max(image_width, image_height)
+    if longest > OCR_MAX_SIDE:
+        scale = OCR_MAX_SIDE / float(longest)
+        with Image.open(image_path) as image:
+            resized = image.convert("RGB").resize(
+                (max(1, int(image_width * scale)), max(1, int(image_height * scale))),
+                Image.Resampling.BILINEAR,
+            )
+            ocr_input = np.asarray(resized)
+
+    with _OCR_LOCK:
+        result = _ocr_engine()(ocr_input)
+    if result is None or result.boxes is None:
+        return [], [], []
+
+    texts = list(result.txts) if result.txts is not None else []
+    scores = [float(score) for score in result.scores] if result.scores is not None else []
+    boxes: list[Any] = []
+    for points in result.boxes:
+        if scale == 1.0:
+            boxes.append(points)
+            continue
+        boxes.append([[float(x) / scale, float(y) / scale] for x, y in points])
+    return texts, boxes, scores
 
 
 def detect_privacy_items(image_path: str, image_id: str, original_url: str) -> DetectResponse:
@@ -132,28 +249,34 @@ def detect_privacy_items(image_path: str, image_id: str, original_url: str) -> D
     detector_mode = "ocr"
     detector_message = "已使用本地 OCR 与二维码检测引擎分析图片。"
     try:
-        with _OCR_LOCK:
-            result = _ocr_engine()(str(Path(image_path)))
-        if result is not None and result.boxes is not None:
-            result_texts = list(result.txts) if result.txts is not None else []
-            result_boxes = list(result.boxes) if result.boxes is not None else []
-            result_scores = [float(score) for score in result.scores] if result.scores is not None else []
-            items.extend(
-                findings_from_ocr(
-                    result_texts,
-                    result_boxes,
-                    result_scores,
-                    width,
-                    height,
-                    image_id,
-                )
+        result_texts, result_boxes, result_scores = _run_ocr(image_path, width, height)
+        items.extend(
+            findings_from_ocr(
+                result_texts,
+                result_boxes,
+                result_scores,
+                width,
+                height,
+                image_id,
             )
+        )
     except (ImportError, OSError, RuntimeError, ValueError) as exc:
         detector_mode = "unavailable"
         detector_message = f"OCR 引擎暂不可用，仅完成二维码检测：{type(exc).__name__}。"
 
     qr_items = _detect_qr_codes(image_path, width, height, image_id)
-    items.extend(qr_items)
+    existing_qr_boxes = [item.box for item in items if item.type == "qr_code"]
+    for qr_item in qr_items:
+        if any(
+            abs(qr_item.box.x - box.x) < 24
+            and abs(qr_item.box.y - box.y) < 24
+            and abs(qr_item.box.width - box.width) < 48
+            and abs(qr_item.box.height - box.height) < 48
+            for box in existing_qr_boxes
+        ):
+            continue
+        items.append(qr_item)
+        existing_qr_boxes.append(qr_item.box)
     if detector_mode == "unavailable" and qr_items:
         detector_message = "OCR 引擎暂不可用，已完成二维码检测。"
 

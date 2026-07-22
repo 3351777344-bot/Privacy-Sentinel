@@ -1,12 +1,19 @@
 import base64
 import json
 import logging
+import re
 from pathlib import Path
 
 from config import settings
 from schemas.models import Box, PrivacyItem
 
 logger = logging.getLogger(__name__)
+
+_OCR_TEXT_PROMPT = (
+    "Recognize all text in the image. Return ONLY JSON without markdown:\n"
+    '[{"text":"line text","rotate_rect":[center_x,center_y,width,height,angle]}]\n'
+    "Use 0-1000 normalized coordinates for rotate_rect."
+)
 
 _TYPE_MAPPING = {
     "phone": "phone",
@@ -82,6 +89,98 @@ def _image_to_base64(image_path: str) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 
+def _encode_image_for_vision(image_path: str) -> tuple[str, str]:
+    """Compress/resize image for vision API to cut upload and inference latency.
+
+    Returns ``(base64_payload, mime_type)``. Falls back to the original file bytes
+    when Pillow cannot open the image.
+    """
+    max_side = max(256, int(getattr(settings, "qwen_image_max_side", 1280) or 1280))
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+
+        with Image.open(image_path) as image:
+            rgb = image.convert("RGB")
+            width, height = rgb.size
+            longest = max(width, height)
+            if longest > max_side:
+                scale = max_side / float(longest)
+                rgb = rgb.resize(
+                    (max(1, int(width * scale)), max(1, int(height * scale))),
+                    Image.Resampling.LANCZOS,
+                )
+            buffer = BytesIO()
+            rgb.save(buffer, format="JPEG", quality=80, optimize=True)
+            return base64.b64encode(buffer.getvalue()).decode("utf-8"), "image/jpeg"
+    except Exception as exc:
+        logger.warning("Vision image compress failed, using original bytes: %s", exc)
+        ext = Path(image_path).suffix.lower().lstrip(".")
+        mime_map = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}
+        return _image_to_base64(image_path), mime_map.get(ext, "image/png")
+
+
+def _qwen_client():
+    from openai import OpenAI
+
+    timeout = max(5, int(getattr(settings, "qwen_timeout_seconds", 35) or 35))
+    return OpenAI(
+        api_key=settings.qwen_api_key,
+        base_url=settings.qwen_api_base,
+        timeout=timeout,
+    )
+
+
+def _qwen_max_tokens() -> int:
+    return max(256, int(getattr(settings, "qwen_max_tokens", 1536) or 1536))
+
+
+def _is_ocr_model(model: str | None = None) -> bool:
+    name = (model or settings.qwen_model or "").lower()
+    return "ocr" in name
+
+
+def _extract_json_payload(content: str):
+    """Parse model JSON that may be wrapped in markdown fences."""
+    text = (content or "").strip()
+    if not text:
+        return None
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, count=1, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
+        text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        for open_ch, close_ch in (("[", "]"), ("{", "}")):
+            start = text.find(open_ch)
+            end = text.rfind(close_ch)
+            if start >= 0 and end > start:
+                try:
+                    return json.loads(text[start : end + 1])
+                except json.JSONDecodeError:
+                    continue
+    return None
+
+
+def _box_from_rotate_rect(rotate_rect: list[float], img_w: int, img_h: int) -> Box:
+    cx, cy, rw, rh = [float(value) for value in rotate_rect[:4]]
+    angle = float(rotate_rect[4]) if len(rotate_rect) > 4 else 0.0
+    # Near-vertical text: swap extents for an axis-aligned mask box.
+    if 45.0 <= abs(angle) % 180.0 <= 135.0:
+        rw, rh = rh, rw
+    left = max(0, int((cx - rw / 2.0) / 1000.0 * img_w))
+    top = max(0, int((cy - rh / 2.0) / 1000.0 * img_h))
+    width = max(1, int(rw / 1000.0 * img_w))
+    height = max(1, int(rh / 1000.0 * img_h))
+    if left + width > img_w:
+        width = max(1, img_w - left)
+    if top + height > img_h:
+        height = max(1, img_h - top)
+    return Box(x=left, y=top, width=width, height=height)
+
+
 def _normalized_to_pixel(bbox_2d: list[float], img_w: int, img_h: int) -> Box:
     x1, y1, x2, y2 = bbox_2d[:4]
     left = max(0, int(x1 / 1000 * img_w))
@@ -99,22 +198,19 @@ def _call_qwen_api(image_path: str) -> list[dict]:
         return []
 
     try:
-        from openai import OpenAI
+        from openai import OpenAI  # noqa: F401
     except ImportError:
         logger.warning("openai package not installed, Qwen VL API unavailable")
         return []
 
     try:
-        base64_image = _image_to_base64(image_path)
-        ext = Path(image_path).suffix.lower().lstrip(".")
-        mime_map = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}
-        mime_type = mime_map.get(ext, "image/png")
-
-        client = OpenAI(api_key=settings.qwen_api_key, base_url=settings.qwen_api_base)
-
-        response = client.chat.completions.create(
-            model=settings.qwen_model,
-            messages=[
+        base64_image, mime_type = _encode_image_for_vision(image_path)
+        client = _qwen_client()
+        use_ocr = _is_ocr_model()
+        prompt = _OCR_TEXT_PROMPT if use_ocr else _PRIVACY_DETECTION_PROMPT
+        request: dict = {
+            "model": settings.qwen_model,
+            "messages": [
                 {
                     "role": "user",
                     "content": [
@@ -122,27 +218,91 @@ def _call_qwen_api(image_path: str) -> list[dict]:
                             "type": "image_url",
                             "image_url": {"url": f"data:{mime_type};base64,{base64_image}"},
                         },
-                        {"type": "text", "text": _PRIVACY_DETECTION_PROMPT},
+                        {"type": "text", "text": prompt},
                     ],
                 },
             ],
-            response_format={"type": "json_object"},
-            max_tokens=4096,
-            temperature=0.1,
-        )
+            "max_tokens": _qwen_max_tokens(),
+            "temperature": 0.1,
+        }
+        if not use_ocr:
+            request["response_format"] = {"type": "json_object"}
 
+        response = client.chat.completions.create(**request)
         content = response.choices[0].message.content
-        if not content:
+        payload = _extract_json_payload(content or "")
+        if payload is None:
+            if use_ocr and content and content.strip():
+                return [{"type": "other", "label": "OCR文本", "text": content.strip()[:120], "riskLevel": "low"}]
             return []
-
-        result = json.loads(content)
-        return result.get("items", [])
-    except json.JSONDecodeError as exc:
-        logger.error("Failed to parse Qwen VL response as JSON: %s", exc)
+        if use_ocr:
+            return _ocr_payload_to_raw_items(payload)
+        if isinstance(payload, dict):
+            return payload.get("items", [])
         return []
     except Exception as exc:
         logger.error("Qwen VL API call failed: %s", exc)
         return []
+
+
+def _ocr_payload_to_raw_items(payload) -> list[dict]:
+    """Normalize OCR model outputs into VL-like raw item dicts."""
+    lines: list[dict] = []
+    if isinstance(payload, list):
+        lines = [item for item in payload if isinstance(item, dict)]
+    elif isinstance(payload, dict):
+        if isinstance(payload.get("texts"), list):
+            for item in payload["texts"]:
+                if isinstance(item, str):
+                    lines.append({"text": item})
+                elif isinstance(item, dict):
+                    lines.append(item)
+        elif isinstance(payload.get("items"), list):
+            return [item for item in payload["items"] if isinstance(item, dict)]
+        elif payload.get("text"):
+            lines.append({"text": str(payload["text"])})
+
+    raw_items: list[dict] = []
+    from detector.privacy_detector import PRIVACY_PATTERNS, _redact_text
+
+    for line in lines:
+        text = str(line.get("text", "")).strip()
+        if not text:
+            continue
+        bbox = line.get("bbox_2d")
+        rotate = line.get("rotate_rect")
+        matched = False
+        for finding_type, label, pattern, risk_level, suggestion in PRIVACY_PATTERNS:
+            match = pattern.search(text)
+            if not match:
+                continue
+            matched = True
+            item = {
+                "type": finding_type,
+                "label": label,
+                "text": _redact_text(match.group(0), finding_type),
+                "riskLevel": risk_level,
+                "suggestion": suggestion,
+            }
+            if isinstance(bbox, list) and len(bbox) >= 4:
+                item["bbox_2d"] = bbox
+            if isinstance(rotate, list) and len(rotate) >= 4:
+                item["rotate_rect"] = rotate
+            raw_items.append(item)
+        if not matched and len(text) >= 6:
+            item = {
+                "type": "other",
+                "label": "OCR文本",
+                "text": text[:80],
+                "riskLevel": "low",
+                "suggestion": "请人工确认是否包含敏感信息。",
+            }
+            if isinstance(bbox, list) and len(bbox) >= 4:
+                item["bbox_2d"] = bbox
+            if isinstance(rotate, list) and len(rotate) >= 4:
+                item["rotate_rect"] = rotate
+            raw_items.append(item)
+    return raw_items
 
 
 def _parse_qwen_items(raw_items: list[dict], image_id: str, img_w: int, img_h: int) -> list[PrivacyItem]:
@@ -156,8 +316,11 @@ def _parse_qwen_items(raw_items: list[dict], image_id: str, img_w: int, img_h: i
                 risk = "medium"
 
             bbox_raw = item.get("bbox_2d")
+            rotate_raw = item.get("rotate_rect")
             if isinstance(bbox_raw, list) and len(bbox_raw) >= 4:
                 box = _normalized_to_pixel(bbox_raw, img_w, img_h)
+            elif isinstance(rotate_raw, list) and len(rotate_raw) >= 4:
+                box = _box_from_rotate_rect(rotate_raw, img_w, img_h)
             else:
                 box = Box(x=0, y=0, width=img_w, height=img_h)
 
@@ -194,8 +357,23 @@ def _build_ocr_context(items: list[PrivacyItem]) -> str:
         return "Local OCR found no text."
     lines = []
     for item in items:
-        lines.append(f"- [{item.type}] label={item.label}, text={item.text}, risk={item.riskLevel}, bbox=({item.box.x},{item.box.y},{item.box.width}x{item.box.height})")
+        lines.append(
+            f"- [{item.type}] label={item.label}, text={item.text}, risk={item.riskLevel}, "
+            f"bbox=({item.box.x},{item.box.y},{item.box.width}x{item.box.height})"
+        )
     return "Local OCR detections:\n" + "\n".join(lines)
+
+
+def _merge_vision_items(local_items: list[PrivacyItem], vision_items: list[PrivacyItem]) -> list[PrivacyItem]:
+    merged = list(local_items)
+    existing = {(item.type, re.sub(r"\s+", "", item.text.lower())) for item in local_items}
+    for item in vision_items:
+        key = (item.type, re.sub(r"\s+", "", item.text.lower()))
+        if key in existing:
+            continue
+        merged.append(item)
+        existing.add(key)
+    return merged
 
 
 def enhance_with_qwen(
@@ -205,57 +383,44 @@ def enhance_with_qwen(
     img_w: int,
     img_h: int,
 ) -> list[PrivacyItem]:
-    """Hybrid mode: send image to Qwen VL alongside local OCR results for enhanced analysis."""
+    """Hybrid mode: send image to Qwen VL/OCR alongside local OCR results."""
     if not settings.qwen_enabled or not settings.qwen_api_key:
         return local_items
 
-    ocr_context = _build_ocr_context(local_items)
-
-    hybrid_prompt = f"""Analyze this image for privacy risks. The local OCR already found some items, listed below. Your task is to:
-
-1. Verify each local OCR finding - confirm if it's truly a privacy risk
-2. Identify any ADDITIONAL privacy risks the OCR might have missed (handwritten text, complex layouts, visual patterns like ID cards, faces)
-3. Assess the overall risk accurately
-
-Local OCR findings:
-{ocr_context}
-
-Return ONLY a JSON object:
-{{
-  "verified": [
-    {{"id": "original_ocr_item_id_1", "riskLevel": "high|medium|low", "note": "brief reason in Chinese"}}
-  ],
-  "new_items": [
-    {{
-      "type": "phone|id_card|bank_card|email|student_id|order_no|address|qr_code|face|other",
-      "label": "short Chinese label",
-      "text": "actual text found",
-      "riskLevel": "high|medium|low",
-      "suggestion": "masking advice in Chinese",
-      "bbox_2d": [x1, y1, x2, y2]
-    }}
-  ],
-  "overall_assessment": "brief Chinese summary"
-}}
-
-If no additional items found, return empty arrays. No markdown, just JSON."""
-
     try:
-        from openai import OpenAI
+        from openai import OpenAI  # noqa: F401
     except ImportError:
         return local_items
 
     try:
-        base64_image = _image_to_base64(image_path)
-        ext = Path(image_path).suffix.lower().lstrip(".")
-        mime_map = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}
-        mime_type = mime_map.get(ext, "image/png")
+        base64_image, mime_type = _encode_image_for_vision(image_path)
+        client = _qwen_client()
+        use_ocr = _is_ocr_model()
 
-        client = OpenAI(api_key=settings.qwen_api_key, base_url=settings.qwen_api_base)
+        if use_ocr:
+            prompt = _OCR_TEXT_PROMPT
+        else:
+            ocr_context = _build_ocr_context(local_items)
+            prompt = f"""Check this image for privacy risks. Local OCR already found:
+{ocr_context}
 
-        response = client.chat.completions.create(
-            model=settings.qwen_model,
-            messages=[
+Return ONLY JSON:
+{{
+  "verified": [{{"id": "ocr_item_id", "riskLevel": "high|medium|low"}}],
+  "new_items": [{{
+    "type": "phone|id_card|bank_card|email|student_id|order_no|address|qr_code|face|other",
+    "label": "short Chinese label",
+    "text": "text found",
+    "riskLevel": "high|medium|low",
+    "suggestion": "Chinese masking advice",
+    "bbox_2d": [x1, y1, x2, y2]
+  }}]
+}}
+Verify OCR hits, add missed risks only. Empty arrays if nothing new. JSON only."""
+
+        request: dict = {
+            "model": settings.qwen_model,
+            "messages": [
                 {
                     "role": "user",
                     "content": [
@@ -263,25 +428,34 @@ If no additional items found, return empty arrays. No markdown, just JSON."""
                             "type": "image_url",
                             "image_url": {"url": f"data:{mime_type};base64,{base64_image}"},
                         },
-                        {"type": "text", "text": hybrid_prompt},
+                        {"type": "text", "text": prompt},
                     ],
                 },
             ],
-            response_format={"type": "json_object"},
-            max_tokens=4096,
-            temperature=0.1,
-        )
+            "max_tokens": _qwen_max_tokens(),
+            "temperature": 0.1,
+        }
+        if not use_ocr:
+            request["response_format"] = {"type": "json_object"}
 
+        response = client.chat.completions.create(**request)
         content = response.choices[0].message.content
-        if not content:
+        payload = _extract_json_payload(content or "")
+        if payload is None:
+            logger.error("Failed to parse hybrid Qwen response: empty or invalid JSON")
             return local_items
 
-        result = json.loads(content)
+        if use_ocr:
+            vision_items = _parse_qwen_items(_ocr_payload_to_raw_items(payload), image_id, img_w, img_h)
+            return _merge_vision_items(local_items, vision_items)
+
+        if not isinstance(payload, dict):
+            return local_items
 
         verified_map: dict[str, str] = {}
-        for v in result.get("verified", []):
-            vid = v.get("id", "")
-            new_risk = v.get("riskLevel")
+        for verified in payload.get("verified", []):
+            vid = verified.get("id", "")
+            new_risk = verified.get("riskLevel")
             if vid and new_risk in {"high", "medium", "low"}:
                 verified_map[vid] = new_risk
 
@@ -299,14 +473,8 @@ If no additional items found, return empty arrays. No markdown, just JSON."""
             else:
                 updated_items.append(item)
 
-        new_raw = result.get("new_items", [])
-        new_items = _parse_qwen_items(new_raw, image_id, img_w, img_h)
-        updated_items.extend(new_items)
-
-        return updated_items
-    except json.JSONDecodeError as exc:
-        logger.error("Failed to parse hybrid Qwen VL response: %s", exc)
-        return local_items
+        new_items = _parse_qwen_items(payload.get("new_items", []), image_id, img_w, img_h)
+        return _merge_vision_items(updated_items, new_items)
     except Exception as exc:
         logger.error("Hybrid Qwen VL call failed: %s", exc)
         return local_items

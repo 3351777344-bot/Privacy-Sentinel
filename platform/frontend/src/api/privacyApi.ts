@@ -13,6 +13,8 @@ import type {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
 
 const FETCH_TIMEOUT_MS = 30_000; // 30 seconds
+const DETECT_LOCAL_TIMEOUT_MS = 60_000;
+const DETECT_ONLINE_TIMEOUT_MS = 120_000;
 
 async function fetchWithTimeout(input: RequestInfo, init?: RequestInit, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
@@ -20,6 +22,11 @@ async function fetchWithTimeout(input: RequestInfo, init?: RequestInit, timeoutM
   try {
     const response = await fetch(input, { ...init, signal: controller.signal });
     return response;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('请求超时，请稍后重试。联网增强可能需要更长时间。');
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
   }
@@ -42,10 +49,15 @@ export async function detectImage(file: File, processingMode: ProcessingMode): P
   const formData = new FormData();
   formData.append('file', file);
   formData.append('processing_mode', processingMode);
-  const response = await fetchWithTimeout(`${API_BASE_URL}/api/detect`, {
-    method: 'POST',
-    body: formData
-  });
+  const timeoutMs = processingMode === 'online' ? DETECT_ONLINE_TIMEOUT_MS : DETECT_LOCAL_TIMEOUT_MS;
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}/api/detect`,
+    {
+      method: 'POST',
+      body: formData
+    },
+    timeoutMs
+  );
   return parseResponse<DetectResult>(response);
 }
 
