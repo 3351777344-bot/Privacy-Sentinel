@@ -1,4 +1,5 @@
 from io import BytesIO
+import zipfile
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -33,6 +34,45 @@ def test_health_and_code_auto_detection() -> None:
     assert response.status_code == 200
     assert response.json()["language"] == "python"
     assert main.history_store.list()[0]["module"] == "code"
+
+
+def test_code_project_zip_can_be_scanned() -> None:
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("src/main.py", 'api_key = "super-secret-value"')
+        archive.writestr("src/view.ets", "const ready: boolean = true;")
+        archive.writestr("node_modules/pkg/index.js", 'password = "ignored-secret-value"')
+
+    response = client.post(
+        "/api/code/analyze",
+        data={"language": "auto", "processing_mode": "local"},
+        files={"file": ("guardianhub.zip", buffer.getvalue(), "application/zip")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["scanMode"] == "project"
+    assert payload["projectName"] == "guardianhub"
+    assert payload["scannedFiles"] == 2
+    assert payload["skippedFiles"] == 1
+    assert payload["vulnerabilities"][0]["filePath"] == "src/main.py"
+    assert main.history_store.list()[0]["module"] == "code"
+
+
+def test_code_project_zip_rejects_unsafe_paths() -> None:
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("../evil.py", "print('bad')")
+
+    response = client.post(
+        "/api/code/analyze",
+        data={"language": "auto", "processing_mode": "local"},
+        files={"file": ("unsafe.zip", buffer.getvalue(), "application/zip")},
+    )
+
+    assert response.status_code == 400
+    assert "不安全路径" in response.json()["detail"]
+    assert main.history_store.list() == []
 
 
 def test_qr_image_can_be_decoded_locally() -> None:

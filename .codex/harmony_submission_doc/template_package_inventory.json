@@ -1,0 +1,97 @@
+[
+  {
+    "path": "[Content_Types].xml",
+    "size": 2094,
+    "crc": 3339465672
+  },
+  {
+    "path": "_rels/.rels",
+    "size": 737,
+    "crc": 92165529
+  },
+  {
+    "path": "word/_rels/document.xml.rels",
+    "size": 1485,
+    "crc": 3746364206
+  },
+  {
+    "path": "word/document.xml",
+    "size": 144039,
+    "crc": 4096431993
+  },
+  {
+    "path": "word/footer1.xml",
+    "size": 4138,
+    "crc": 3306980791
+  },
+  {
+    "path": "word/endnotes.xml",
+    "size": 2538,
+    "crc": 136289368
+  },
+  {
+    "path": "word/footnotes.xml",
+    "size": 2544,
+    "crc": 1604427715
+  },
+  {
+    "path": "word/theme/theme1.xml",
+    "size": 6466,
+    "crc": 2081172887
+  },
+  {
+    "path": "word/settings.xml",
+    "size": 6264,
+    "crc": 3351755314
+  },
+  {
+    "path": "word/styles.xml",
+    "size": 31811,
+    "crc": 2714627641
+  },
+  {
+    "path": "word/numbering.xml",
+    "size": 8459,
+    "crc": 1735469005
+  },
+  {
+    "path": "docProps/custom.xml",
+    "size": 1217,
+    "crc": 1894213291
+  },
+  {
+    "path": "customXml/_rels/item1.xml.rels",
+    "size": 296,
+    "crc": 2050572148
+  },
+  {
+    "path": "customXml/itemProps1.xml",
+    "size": 341,
+    "crc": 1031546414
+  },
+  {
+    "path": "customXml/item1.xml",
+    "size": 306,
+    "crc": 3809420641
+  },
+  {
+    "path": "docProps/core.xml",
+    "size": 660,
+    "crc": 2743622878
+  },
+  {
+    "path": "word/fontTable.xml",
+    "size": 1986,
+    "crc": 3347309617
+  },
+  {
+    "path": "word/webSettings.xml",
+    "size": 604,
+    "crc": 515988554
+  },
+  {
+    "path": "docProps/app.xml",
+    "size": 713,
+    "crc": 1967629554
+  }
+]

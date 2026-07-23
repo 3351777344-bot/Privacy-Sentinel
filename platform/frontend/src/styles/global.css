@@ -2868,3 +2868,112 @@ body {
 .code-preview {
   max-height: min(56vh, 440px);
 }
+.archive-selected textarea {
+  color: #64748b;
+  background: #f8fafc;
+}
+
+.archive-safety-note {
+  margin: 10px 0 0;
+  padding: 11px 13px;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  color: #1e40af;
+  background: #eff6ff;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.project-summary-card {
+  display: grid;
+  gap: 16px;
+}
+
+.project-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.project-metrics > div {
+  display: grid;
+  gap: 4px;
+  padding: 13px;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.project-metrics small {
+  color: #64748b;
+}
+
+.project-metrics strong {
+  color: #172033;
+  font-size: 22px;
+}
+
+.project-language-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.project-language-list span {
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: #334155;
+  background: #e2e8f0;
+  font-size: 12px;
+}
+
+.top-risk-files {
+  display: grid;
+  gap: 8px;
+}
+
+.top-risk-files > strong {
+  margin-bottom: 2px;
+}
+
+.top-risk-files article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 12px;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+}
+
+.top-risk-files article > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.top-risk-files article > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.top-risk-files b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top-risk-files small {
+  color: #64748b;
+}
+
+@media (max-width: 720px) {
+  .project-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .top-risk-files article {
+    align-items: flex-start;
+  }
+}

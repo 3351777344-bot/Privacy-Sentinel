@@ -40,7 +40,10 @@ const DETECTOR_LABELS: Record<string, string> = {
 function evidenceFromResult(result: CodeAnalyzeResponse | null): TextFinding[] {
   return (
     result?.vulnerabilities.map((item) => ({
-      label: (item.source === 'deepseek' ? '[DeepSeek] ' : '') + (item.line ? `${item.title} / 第 ${item.line} 行` : item.title),
+      label:
+        (item.source === 'deepseek' ? '[DeepSeek] ' : '') +
+        (item.filePath ? `${item.filePath} / ` : '') +
+        (item.line ? `${item.title} / 第 ${item.line} 行` : item.title),
       evidence: `${item.snippet || '未截取到代码片段'}。${item.reason}`,
       riskLevel: item.riskLevel
     })) ?? []
@@ -70,7 +73,9 @@ export default function CodePage(props: CodePageProps) {
   const linesRef = useRef<HTMLDivElement>(null);
 
   const vulns = props.result?.vulnerabilities ?? [];
-  const vulnLineSet = buildVulnLineSet(vulns);
+  const isProjectScan = props.result?.scanMode === 'project';
+  const isArchiveFile = props.file?.name.toLowerCase().endsWith('.zip') ?? false;
+  const vulnLineSet = isProjectScan ? new Set<number>() : buildVulnLineSet(vulns);
   const codeLines = props.text.split('\n');
 
   useEffect(() => {
@@ -100,14 +105,14 @@ export default function CodePage(props: CodePageProps) {
 
   return (
     <>
-      <PageHero eyebrow="Code Guardian" title="Code Guardian 代码卫士" copy="提交代码之前先检查潜在风险；可选择纯本地规则或联网 AI 增强。" onBack={props.onBack} />
+      <PageHero eyebrow="Code Guardian" title="Code Guardian 代码卫士" copy="提交代码之前检查单个文件或项目 ZIP；项目包默认执行本地、只读、可解释的安全扫描。" onBack={props.onBack} />
       <div className="tool-grid">
         <section className="card form-card">
           <div className="section-title">
             <span>01</span>
             <div>
               <h3>代码输入区</h3>
-              <p>粘贴代码或上传单个代码文件，支持 .py / .java / .js / .ts / .sql / .txt。</p>
+              <p>粘贴代码、上传单个文件，或上传课程项目与竞赛作品 ZIP。</p>
             </div>
           </div>
           <label className="field-label">
@@ -124,14 +129,16 @@ export default function CodePage(props: CodePageProps) {
           </p>
           {props.result && (
             <p className="muted">
-              识别语言：{props.result.language}（{props.result.languageSource}，{Math.round(props.result.languageConfidence * 100)}%）
+              {isProjectScan
+                ? `项目扫描：${props.result.projectName ?? '未命名项目'}`
+                : `识别语言：${props.result.language}（${props.result.languageSource}，${Math.round(props.result.languageConfidence * 100)}%）`}
               {props.result.detectorSource && <> · {DETECTOR_LABELS[props.result.detectorSource] ?? props.result.detectorSource}</>}
             </p>
           )}
           {props.result?.deepseekWarning && (
             <div className="deepseek-warning">{props.result.deepseekWarning}</div>
           )}
-          <div className="code-editor-wrapper">
+          <div className={`code-editor-wrapper ${isArchiveFile ? 'archive-selected' : ''}`}>
             <div className="code-line-numbers" ref={linesRef}>
               {codeLines.map((_, idx) => (
                 <span key={idx} className={vulnLineSet.has(idx + 1) ? 'vuln-line' : ''}>{idx + 1}</span>
@@ -143,14 +150,17 @@ export default function CodePage(props: CodePageProps) {
               onChange={(event) => props.onTextChange(event.target.value)}
               className="code-textarea"
               spellCheck={false}
-              placeholder="在此粘贴代码…"
+              placeholder={isArchiveFile ? '已选择项目 ZIP；扫描时不会执行或安装其中的代码。' : '在此粘贴代码…'}
+              disabled={isArchiveFile}
             />
           </div>
           <label className={`upload-box doc-upload-box ${props.file ? 'has-file' : ''}`}>
-            <input type="file" accept=".py,.java,.js,.ts,.sql,.txt,.zip" onChange={(event) => {
+            <input type="file" accept=".py,.java,.js,.jsx,.ts,.tsx,.ets,.sql,.txt,.zip" onChange={(event) => {
               const f = event.target.files?.[0] ?? null;
               if (f && !f.name.toLowerCase().endsWith('.zip')) {
                 f.text().then((t) => props.onTextChange(t));
+              } else if (f) {
+                props.onTextChange('');
               }
               props.onFileChange(f);
             }} />
@@ -162,12 +172,16 @@ export default function CodePage(props: CodePageProps) {
             ) : (
               <>
                 <span className="upload-icon">+</span>
-                <strong>选择单个代码文件</strong>
-                <span>.py / .java / .js / .ts / .sql / .txt</span>
+                <strong>选择代码文件或项目 ZIP</strong>
+                <span>.py / .java / .js / .ts / .ets / .sql / .zip</span>
               </>
             )}
           </label>
-          {props.file?.name.toLowerCase().endsWith('.zip') && <p className="muted">暂不支持 zip 项目包，请上传单个文件或粘贴代码。</p>}
+          {isArchiveFile && (
+            <p className="archive-safety-note">
+              ZIP 将在内存中只读扫描；限制文件数、解压总量和异常压缩比，并忽略依赖与构建目录。
+            </p>
+          )}
           <button className="primary-button" disabled={props.loading || (!props.text.trim() && !props.file)} onClick={props.onAnalyze}>
             {props.loading ? '检测中...' : '开始代码安全检测'}
           </button>
@@ -183,7 +197,41 @@ export default function CodePage(props: CodePageProps) {
             suggestions={props.result?.suggestions}
           />
 
-          {props.processingMode === 'online' && props.result && vulns.length > 0 && (
+          {isProjectScan && props.result && (
+            <section className="card result-card project-summary-card">
+              <div className="section-title">
+                <span>P</span>
+                <div>
+                  <h3>项目扫描概览</h3>
+                  <p>{props.result.projectName ?? '项目代码包'} · 安全、只读、不执行代码</p>
+                </div>
+              </div>
+              <div className="project-metrics">
+                <div><small>压缩包条目</small><strong>{props.result.totalEntries ?? 0}</strong></div>
+                <div><small>已扫描文件</small><strong>{props.result.scannedFiles ?? 0}</strong></div>
+                <div><small>跳过文件</small><strong>{props.result.skippedFiles ?? 0}</strong></div>
+                <div><small>风险项</small><strong>{props.result.vulnerabilities.length}</strong></div>
+              </div>
+              <div className="project-language-list">
+                {Object.entries(props.result.languages ?? {}).map(([language, count]) => (
+                  <span key={language}>{language} <b>{count}</b></span>
+                ))}
+              </div>
+              {(props.result.topRiskFiles?.length ?? 0) > 0 && (
+                <div className="top-risk-files">
+                  <strong>风险文件优先级</strong>
+                  {props.result.topRiskFiles?.map((file) => (
+                    <article key={file.path}>
+                      <div><b>{file.path}</b><small>{file.language} · {file.vulnerabilityCount} 项风险</small></div>
+                      <div><RiskBadge level={file.riskLevel} compact /><strong>{file.score}</strong></div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {props.processingMode === 'online' && props.result && !isProjectScan && vulns.length > 0 && (
             <section className="card result-card">
               <div className="section-title">
                 <span>F</span>

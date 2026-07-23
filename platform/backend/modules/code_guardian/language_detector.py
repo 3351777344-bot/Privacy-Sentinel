@@ -10,6 +10,7 @@ EXTENSION_LANGUAGE_MAP = {
     ".jsx": "javascript",
     ".ts": "typescript",
     ".tsx": "typescript",
+    ".ets": "typescript",
     ".sql": "sql",
     ".txt": "other",
 }

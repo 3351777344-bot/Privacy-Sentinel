@@ -97,11 +97,20 @@ class CodeVulnerability(BaseModel):
     type: str
     title: str
     riskLevel: RiskLevel
+    filePath: Optional[str] = None
     line: Optional[int] = None
     snippet: str
     reason: str
     suggestion: str
     source: Literal["rule", "deepseek"] = "rule"
+
+
+class CodeProjectFileSummary(BaseModel):
+    path: str
+    language: str
+    riskLevel: RiskLevel
+    score: int = Field(ge=0, le=100)
+    vulnerabilityCount: int = Field(ge=0)
 
 
 class CodeAnalyzeResponse(BaseModel):
@@ -116,6 +125,14 @@ class CodeAnalyzeResponse(BaseModel):
     shouldSubmit: bool
     detectorSource: Literal["rule", "deepseek"] = "rule"
     deepseekWarning: Optional[str] = None
+    scanMode: Literal["single", "project"] = "single"
+    projectName: Optional[str] = None
+    totalEntries: int = Field(default=0, ge=0)
+    scannedFiles: int = Field(default=0, ge=0)
+    skippedFiles: int = Field(default=0, ge=0)
+    languages: dict[str, int] = Field(default_factory=dict)
+    topRiskFiles: List[CodeProjectFileSummary] = Field(default_factory=list)
+    fileSummaries: List[CodeProjectFileSummary] = Field(default_factory=list)
 
 
 class ScamAnalyzeRequest(BaseModel):

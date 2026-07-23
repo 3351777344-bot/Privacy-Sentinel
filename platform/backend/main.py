@@ -20,6 +20,11 @@ from image_processor.blur import apply_blur_mask
 from image_processor.mask import apply_black_mask
 from image_processor.mosaic import apply_mosaic_mask
 from modules.code_guardian.analyzer import analyze_code as run_code_guardian
+from modules.code_guardian.archive_scanner import (
+    ArchiveLimits,
+    ArchiveValidationError,
+    analyze_code_archive,
+)
 from modules.doc_shield.completeness_checker import check_completeness
 from modules.doc_shield.file_extractor import extract_file
 from modules.doc_shield.format_checker import check_format
@@ -378,6 +383,7 @@ async def analyze_code(request: Request) -> CodeAnalyzeResponse:
     filename: str | None = None
     processing_mode = "local"
     code = ""
+    archive_content: bytes | None = None
 
     if "multipart/form-data" in content_type:
         form = await request.form()
@@ -390,10 +396,14 @@ async def analyze_code(request: Request) -> CodeAnalyzeResponse:
         filename = getattr(upload, "filename", "") or ""
         extension = Path(filename).suffix.lower()
         if extension == ".zip":
-            raise HTTPException(status_code=400, detail="项目级 zip 扫描为后续扩展功能，请先上传单个代码文件。")
-        if extension not in {".py", ".java", ".js", ".ts", ".sql", ".txt"}:
-            raise HTTPException(status_code=400, detail="当前仅支持 .py、.java、.js、.ts、.sql、.txt 文件。")
-        code = _decode_upload(await _read_upload_limited(upload, settings.max_code_bytes))
+            archive_content = await _read_upload_limited(upload, settings.max_code_archive_bytes)
+        elif extension not in {".py", ".java", ".js", ".jsx", ".ts", ".tsx", ".ets", ".sql", ".txt"}:
+            raise HTTPException(
+                status_code=400,
+                detail="当前仅支持 .py、.java、.js、.jsx、.ts、.tsx、.ets、.sql、.txt 和 .zip 文件。",
+            )
+        else:
+            code = _decode_upload(await _read_upload_limited(upload, settings.max_code_bytes))
     else:
         try:
             payload = await request.json()
@@ -407,19 +417,36 @@ async def analyze_code(request: Request) -> CodeAnalyzeResponse:
         if len(code.encode("utf-8")) > settings.max_code_bytes:
             raise HTTPException(status_code=413, detail="代码内容过大，最大允许 1 MB。")
 
-    if not code.strip():
-        raise HTTPException(status_code=400, detail="请输入或上传需要检测的代码。")
     if processing_mode not in {"local", "online"}:
         raise HTTPException(status_code=400, detail="处理模式仅支持 local 或 online。")
 
-    result = CodeAnalyzeResponse(
-        **run_code_guardian(
+    if archive_content is not None:
+        try:
+            result_data = await asyncio.to_thread(
+                analyze_code_archive,
+                archive_content,
+                filename or "project.zip",
+                processing_mode,
+                ArchiveLimits(
+                    max_entries=settings.max_code_archive_files,
+                    max_uncompressed_bytes=settings.max_code_uncompressed_bytes,
+                    max_file_bytes=settings.max_code_bytes,
+                    max_compression_ratio=settings.max_code_compression_ratio,
+                ),
+            )
+        except ArchiveValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    else:
+        if not code.strip():
+            raise HTTPException(status_code=400, detail="请输入或上传需要检测的代码。")
+        result_data = run_code_guardian(
             code=code,
             language=language,
             filename=filename,
             processing_mode=processing_mode,
         )
-    )
+
+    result = CodeAnalyzeResponse(**result_data)
     _append_analysis_history("code", result.riskLevel, result.score, result.summary, result_json=result.model_dump_json())
     return result
 

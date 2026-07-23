@@ -235,11 +235,8 @@ export default function App() {
   }
 
   async function handleCodeAnalyze() {
-    if (codeFile?.name.toLowerCase().endsWith('.zip')) {
-      setError('项目级扫描为后续扩展功能，请先上传单个代码文件或粘贴代码。');
-      return;
-    }
-    if (codeFile && !codeText.trim()) {
+    const isProjectArchive = codeFile?.name.toLowerCase().endsWith('.zip') ?? false;
+    if (codeFile && !isProjectArchive && !codeText.trim()) {
       setCodeText(await codeFile.text());
     }
     setLoadingCode(true);
@@ -247,7 +244,7 @@ export default function App() {
     try {
       const result = await analyzeCode(
         codeLanguage,
-        codeText || await (codeFile?.text() ?? ''),
+        isProjectArchive ? '' : codeText || await (codeFile?.text() ?? ''),
         codeProcessingMode,
         codeFile
       );

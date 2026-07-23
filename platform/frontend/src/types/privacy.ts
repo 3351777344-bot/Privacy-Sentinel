@@ -65,11 +65,20 @@ export interface CodeVulnerability {
   type: string;
   title: string;
   riskLevel: RiskLevel;
+  filePath?: string | null;
   line?: number | null;
   snippet: string;
   reason: string;
   suggestion: string;
   source?: 'rule' | 'deepseek';
+}
+
+export interface CodeProjectFileSummary {
+  path: string;
+  language: string;
+  riskLevel: RiskLevel;
+  score: number;
+  vulnerabilityCount: number;
 }
 
 export interface CodeAnalyzeResponse {
@@ -84,6 +93,14 @@ export interface CodeAnalyzeResponse {
   shouldSubmit: boolean;
   detectorSource?: 'rule' | 'deepseek';
   deepseekWarning?: string;
+  scanMode?: 'single' | 'project';
+  projectName?: string | null;
+  totalEntries?: number;
+  scannedFiles?: number;
+  skippedFiles?: number;
+  languages?: Record<string, number>;
+  topRiskFiles?: CodeProjectFileSummary[];
+  fileSummaries?: CodeProjectFileSummary[];
 }
 
 export interface LinkCheckItem {

@@ -1,60 +1,117 @@
-# GuardianHub 平台说明
+# GuardianHub 开发与联调指南
 
-GuardianHub 由 React + Vite + TypeScript 前端和 FastAPI 后端组成，是一个优先本地运行、强调可解释结果的高校数字安全 Demo。
+`platform/` 包含 GuardianHub 的三个可运行部分：
 
-## 已实现能力
+| 目录 | 技术栈 | 用途 |
+| --- | --- | --- |
+| `harmony/` | HarmonyOS 6、ArkTS、Stage 模型 | 初赛主要客户端，调用 FastAPI 完成四模块检测 |
+| `frontend/` | React 18、TypeScript、Vite | PC Web 完整能力演示与接口验收 |
+| `backend/` | FastAPI、Pydantic、SQLite | 检测、脱敏、历史记录与统一 API |
 
-1. Privacy Sentinel：RapidOCR 中文/英文文字识别、OpenCV 二维码定位、隐私正则分类、坐标标注、黑条/模糊/马赛克处理和处理前后对比。
-2. Code Guardian：自动语言识别、文件后缀识别、多行上下文扫描、命中行号与修复建议。
-3. Link Guard：协议与域名合法性、HTTPS、短链、IP/内网地址、Punycode、关键词、参数、随机 token、来源风险检查。
-4. Doc Shield：PDF、DOCX、TXT、Markdown 内容提取，以及完整性、格式、命名和隐私检查。
+## 后端
 
-四个模块使用统一风险等级与评分函数，检测历史统一保存到 SQLite，刷新页面后仍可查看。
+要求 Python 3.10+。
 
-## 目录
-
-```text
-platform/
-├── backend/          FastAPI、检测器、规则、SQLite 存储和测试
-├── frontend/         React + TypeScript 用户界面
-├── docs/             项目与接口文档
-└── .env.example      可配置的安全限制
-```
-
-## 启动与测试
-
-```bash
+```powershell
 cd backend
 python -m pip install -r requirements.txt
-python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-```bash
+使用 `0.0.0.0` 是为了允许 HarmonyOS 模拟器通过 `http://10.0.2.2:8000` 访问开发电脑。只运行 Web 时也可以监听 `127.0.0.1`。
+
+主要入口：
+
+- `GET /api/health`：健康检查
+- `/docs`：Swagger API 文档
+- `POST /api/detect`、`/api/privacy/process`：图片检测与脱敏
+- `POST /api/code/analyze`：代码或项目 ZIP 扫描
+- `POST /api/link/check`、`/api/link/qr/decode`：链接与二维码检查
+- `POST /api/doc/check`：提交材料检查
+- `GET /api/history`：本地历史记录
+
+完整字段见 [docs/接口文档.md](docs/接口文档.md)。
+
+## PC Web
+
+Vite 8 要求 Node.js 20.19+ 或 22.12+。
+
+```powershell
 cd frontend
 npm install
 npm run dev
 ```
 
-前端构建工具要求 Node.js 22.12 或更高版本。
+默认地址为 `http://127.0.0.1:5173`，默认调用 `http://127.0.0.1:8000`。
 
-```bash
+## HarmonyOS
+
+用 DevEco Studio 打开 `harmony/`，等待同步后选择 API 22 设备运行 `entry`。命令行构建：
+
+```powershell
+cd harmony
+.\build.ps1
+```
+
+当前已接入系统图片/文件 Picker、四模块 API、ArkData 本地历史、处理图预览/系统保存与 Share Kit，已通过 ArkTS 编译并生成调试 HAP。模拟器此前已验证首页、四页面路由及 Link Guard 真实请求；新增保存、分享和历史能力仍需在完成模拟器许可确认后做交互验收。
+
+详细环境和联调说明见 [harmony/README.md](harmony/README.md)。
+
+## 环境配置
+
+后端从 `platform/.env` 读取可选配置。首次使用可复制示例：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+本地模式无需 API 密钥。DeepSeek 和 Qwen VL 默认关闭；不要把真实密钥写入 `.env.example` 或提交到 Git。
+
+关键限制的默认值：
+
+| 项目 | 默认限制 |
+| --- | --- |
+| 图片 | 10 MB、2500 万像素 |
+| 单个代码文件 | 1 MB |
+| 项目 ZIP | 10 MB、300 个条目、解压后 50 MB |
+| 单个材料文件 | 10 MB |
+| 单次材料 | 8 个文件、合计 25 MB |
+| 本地产物保留 | 24 小时 |
+
+## 测试与构建
+
+```powershell
 cd backend
 python -m pip install -r requirements-dev.txt
 python -m pytest
 
-cd ../frontend
+cd ..\frontend
 npm test
 npm run build
+
+cd ..\harmony
+.\build.ps1
 ```
 
-前端页面位于 `frontend/src/pages/`，`App.tsx` 只负责全局状态、导航和 API 流程编排；通用报告和页面组件位于 `frontend/src/components/`。
+仓库 CI 会运行后端测试和前端构建；HarmonyOS 构建目前需在已安装 DevEco Studio 与 SDK 的 Windows 环境执行。
 
-默认前端地址为 `http://127.0.0.1:5173`，后端地址为 `http://127.0.0.1:8000`。
+## 演示样本
 
-## 设计边界
+`samples/` 中提供虚构的代码和材料样本；隐私图片位于 `backend/static/samples/`。生成 Code Guardian 上传用 ZIP：
 
-- OCR、二维码和规则检测都在本机运行，不调用付费大模型 API。
-- Link Guard 只做静态分析，不访问用户输入的目标 URL，避免引入 SSRF 风险。
-- 当前 Code Guardian 面向单文件和代码片段，还不是完整 SAST 或依赖漏洞扫描器。
-- 图片检测不包含人脸识别；“未命中规则”不等于绝对安全，界面会保留人工复核提示。
-- 固定演示框只能通过 `GUARDIANHUB_DEMO_MODE=true` 显式开启。
+```powershell
+cd samples
+.\build-samples.ps1
+```
+
+具体演示输入见 [samples/README.md](samples/README.md)。
+
+## 数据与隐私
+
+- 图片 OCR、二维码解析、规则扫描和图像脱敏可在本机或私有后端完成。
+- 项目 ZIP 在内存中只读扫描，不执行代码，不安装依赖。
+- Link Guard 不访问用户输入的目标网址。
+- SQLite、上传文件、处理结果、构建目录和 `.env` 均已排除在版本控制之外。
+- 联网增强只在用户选择对应模式、启用开关并配置服务后生效。
+
+返回仓库总览、初赛文档和源码打包说明请查看 [根目录 README](../README.md)。

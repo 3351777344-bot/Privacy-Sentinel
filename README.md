@@ -1,130 +1,138 @@
-# GuardianHub · 数字安全防护平台
+# GuardianHub · 高校数字安全防护平台
 
-GuardianHub 是面向高校场景的可控数字安全防护平台 Demo，把风险检查前置到「分享前、提交前、点击前、上传前」四个关键时刻。平台采用**本地优先、联网可选**的处理方式：图片隐私检测和代码检测可在界面中选择纯本地处理或联网增强；链接和提交材料始终在本机静态检查。只有用户主动选择联网增强且已配置模型服务时，相关图片或代码才会发送至第三方 API。当前 PC Web 实现位于 `platform/`。
+GuardianHub 是面向高校学生的“操作前安全闸门”，把风险检查前置到图片分享、代码提交、链接点击和材料上传之前。项目同时提供 HarmonyOS 客户端、PC Web 演示端和 FastAPI 检测服务；四个模块统一输出风险等级、0–100 安全评分、命中证据与处置建议。
 
-- 前端：React 18 + Vite + TypeScript
-- 后端：FastAPI + Pydantic v2
-- 本地能力：RapidOCR（ONNX Runtime）文字识别、OpenCV 二维码/人脸检测、正则与规则引擎
-- 存储：本地 SQLite（历史记录），本地文件系统（原图 / 处理图 / 检测结果）
-- 可选增强：DeepSeek（代码分析与一键修复）、Qwen VL（图片隐私视觉检测），均通过 OpenAI 兼容接口调用，默认关闭
+> 当前状态：HarmonyOS 6.0.2 工程可编译并生成调试 HAP，已在 API 22 手机模拟器完成安装、页面路由和 Link Guard 真实请求验证；系统 Picker、四模块 API、ArkData 本地历史、处理图预览/保存和 Share Kit 均已完成代码接入。PC Web 四模块、项目 ZIP 扫描、历史记录和自动化测试均已跑通。
 
-## 核心模块
+## 四个安全节点
 
-- **Privacy Sentinel 隐私哨兵**：可选择本地 OCR/二维码/人脸规则检测，或使用 Qwen VL 联网增强识别；支持手机号、证件号、银行卡号、邮箱、订单号、地址等敏感区域，并可按「高风险 / 全部 / 自定义」范围进行黑条、模糊、马赛克处理，导出安全分享版本。
-- **Code Guardian 代码卫士**：可选择本地规则或 DeepSeek 联网增强，自动识别代码语言，检查硬编码凭据、SQL 注入、命令执行、路径穿越、弱加密、敏感日志、危险配置和 XSS 等风险；联网模式下还支持 AI 深度分析与一键修复。
-- **Link Guard 链接卫士**：检查 HTTP/HTTPS 协议、域名、IP 直连、短链、可疑参数、随机 token、Punycode 仿冒域名、来源场景等风险，并支持本地解析二维码图片，全程不主动访问目标地址。
-- **Doc Shield 提交护盾**：解析提交要求，从 PDF / DOCX / TXT / Markdown 等材料中提取内容，检查材料完整性、格式规范、命名规则、隐私信息和提交风险。
+| 操作节点 | 模块 | 已实现能力 |
+| --- | --- | --- |
+| 分享图片前 | Privacy Sentinel 隐私哨兵 | OCR、二维码与隐私规则检测，黑条/模糊/马赛克脱敏，导出安全图片 |
+| 提交代码前 | Code Guardian 代码卫士 | 代码片段、单文件和项目 ZIP 静态扫描，文件级证据、行号与修复建议 |
+| 点击链接前 | Link Guard 链接卫士 | URL 与二维码内容静态检查，不主动访问目标地址 |
+| 上传材料前 | Doc Shield 提交护盾 | PDF、DOCX、TXT、Markdown 的完整性、格式、命名与隐私检查 |
 
-所有模块统一输出 `high` / `medium` / `low` 风险等级、0–100 安全评分（分数越高越安全）、命中证据和建议操作。检测历史统一保存在本地 SQLite，刷新页面后仍可查看，并按模块统计平均安全分。
+项目坚持“本地优先、联网可选”。核心规则、OCR、二维码解析和图像处理可在本机或自建后端运行；DeepSeek 与 Qwen VL 仅作为可选增强，默认关闭，只有用户主动选择联网模式并配置服务后才会调用。
 
-## 目录结构
+## 项目结构
 
 ```text
-Privacy-Sentinel/
-├── README.md                    # 项目总说明（本文件）
-├── .github/workflows/ci.yml     # CI：后端 pytest + 前端 build
+GuardianHub/
+├── README.md
+├── .github/workflows/ci.yml
 └── platform/
-    ├── backend/                 # FastAPI 服务
-    │   ├── main.py              # 应用入口与所有 API 路由
-    │   ├── config.py            # 环境变量与运行配置
-    │   ├── detector/            # 隐私检测：OCR / 正则 / 二维码 / 人脸 / 视觉 Agent
-    │   ├── image_processor/     # 黑条、模糊、马赛克处理
-    │   ├── modules/             # code_guardian / link_guard / doc_shield / 风险评分
-    │   ├── schemas/             # Pydantic 数据模型
-    │   ├── storage/             # SQLite 历史存储
-    │   ├── static/              # 上传图、处理图、示例图
-    │   ├── data/                # SQLite 数据库与检测结果 JSON（本地产物）
-    │   └── tests/               # pytest 测试
-    ├── frontend/                # React + TypeScript 界面
-    │   └── src/
-    │       ├── pages/           # Privacy / Code / Link / Doc / History 页面
-    │       ├── components/      # 上传、预览、打码、风险报告等组件
-    │       ├── api/             # 后端接口封装
-    │       └── utils/           # 评分等前端工具
-    ├── docs/                    # 项目介绍、接口文档、演示脚本
-    └── .env.example             # 可配置的安全限制与引擎开关
+    ├── harmony/                 # HarmonyOS 6 / ArkTS 客户端
+    ├── frontend/                # React + Vite + TypeScript PC Web
+    ├── backend/                 # FastAPI、检测引擎、SQLite 与测试
+    ├── samples/                 # 不含真实隐私的演示与验收样本
+    ├── docs/                    # 初赛介绍、接口、展示稿与冲刺计划
+    ├── .env.example             # 后端配置示例
+    └── README.md                # 开发与联调说明
 ```
 
-## 本地启动
+## 快速运行
 
-### 后端（首次安装会加入 RapidOCR 与 ONNX Runtime）
+### 1. 启动后端
 
-```bash
-cd platform/backend
+要求 Python 3.10 或更高版本。若要让 HarmonyOS 模拟器访问服务，后端必须监听 `0.0.0.0`。
+
+```powershell
+cd platform\backend
 python -m pip install -r requirements.txt
-python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 前端
+启动后可访问：
 
-```bash
-cd platform/frontend
+- 健康检查：`http://127.0.0.1:8000/api/health`
+- Swagger API 文档：`http://127.0.0.1:8000/docs`
+
+### 2. 启动 PC Web
+
+Vite 8 要求 Node.js 20.19+ 或 22.12+。
+
+```powershell
+cd platform\frontend
 npm install
 npm run dev
 ```
 
-- 前端：`http://127.0.0.1:5173`
-- 后端：`http://127.0.0.1:8000`
-- API 文档：`http://127.0.0.1:8000/docs`
+浏览器打开 `http://127.0.0.1:5173`。
 
-## API 概览
+### 3. 打开 HarmonyOS 客户端
 
-后端默认地址 `http://127.0.0.1:8000`，详细字段见 `platform/docs/接口文档.md`。
+1. 启动 DevEco Studio，选择 **Open**。
+2. 打开 `platform\harmony`，等待工程同步完成。
+3. 启动 API 22 手机模拟器，选择 `entry` 模块后点击 **Run**。
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/api/health` | 健康检查，返回当前隐私检测引擎 |
-| POST | `/api/detect` | 上传图片进行隐私检测 |
-| POST | `/api/mask` | 对指定区域打码 |
-| POST | `/api/privacy/process` | 按 `high` / `all` / `custom` 范围批量打码 |
-| POST | `/api/export/image/{image_id}` | 下载已处理的安全图片 |
-| POST | `/api/code/analyze` | 代码安全检测（JSON 或文件上传） |
-| POST | `/api/code/fix` | DeepSeek 一键修复（需启用） |
-| POST | `/api/link/check` | 链接静态安全体检 |
-| POST | `/api/link/qr/decode` | 本地解析二维码图片 |
-| POST | `/api/doc/check` | 提交材料检查 |
-| GET | `/api/history` | 分页查询检测历史 |
-| GET | `/api/history/module-averages` | 各模块平均安全分 |
-| DELETE | `/api/history/{record_id}` | 删除单条历史 |
+也可以在 PowerShell 中构建：
 
-## 检测引擎配置
+```powershell
+cd platform\harmony
+.\build.ps1
+```
 
-隐私检测和代码检测可在对应页面选择「本地处理」或「联网增强」。环境变量（见 `platform/.env.example`）用于配置联网模型、默认后端引擎及功能开关：
+调试 HAP 输出到：
 
-- `GUARDIANHUB_PRIVACY_ENGINE`：`ocr`（纯本地）/ `agent`（本地 + 人脸，默认）/ `hybrid`（本地 + Qwen VL）/ `vision_api`（Qwen VL 优先，本地兜底）
-- `GUARDIANHUB_FACE_ENGINE`：人脸检测引擎，默认 `disabled`，启用需配置 `GUARDIANHUB_FACE_MODEL_PATH`
-- `GUARDIANHUB_CODE_ENGINE`：`rule`（本地正则）/ `deepseek`（AI 分析，需 `GUARDIANHUB_DEEPSEEK_ENABLED=true` 且配置密钥）
-- `GUARDIANHUB_QWEN_ENABLED` / `GUARDIANHUB_DEEPSEEK_ENABLED`：外部大模型总开关，默认 `false`
+```text
+platform/harmony/entry/build/default/outputs/default/entry-default-unsigned.hap
+```
 
-> 界面默认选择本地处理。只有选择联网增强后才会尝试调用外部模型；未配置密钥、开关关闭或调用失败时，会自动回退到本地规则并给出提示。DeepSeek 一键修复属于联网功能，必须配置服务后才能使用。
+鸿蒙工程的环境、签名和联调细节见 [platform/harmony/README.md](platform/harmony/README.md)。
 
-## 安全与隐私
+## 配置
 
-- 默认限制图片 10 MB、代码 1 MB、单个材料 10 MB、单次材料总计 25 MB、单次最多 8 个材料文件。
-- 上传图片会校验真实格式和像素尺寸，而不是只相信文件名或 MIME 类型；图片仅支持 PNG、JPEG、WEBP，默认上限 2500 万像素。
-- Link Guard 只做静态分析，不主动访问用户输入的目标 URL，避免引入 SSRF 风险；二维码解析同样在本机完成。
-- 原图、处理图和历史默认保留 24 小时，可通过 `platform/.env.example` 中的环境变量调整。
-- CORS 默认只允许本地 Vite 地址。
-- 历史记录使用本地 SQLite；上传文件、数据库和检测结果均不会提交到 Git。
-- 外部大模型能力（DeepSeek / Qwen VL）默认关闭；需显式配置密钥、开启服务并在界面选择联网增强后才会调用。联网模式可能将当前图片或代码发送给所配置的服务商。
-- 设置 `GUARDIANHUB_DEMO_MODE=true` 才会显式启用固定演示框，默认使用真实 OCR。
+后端不配置 `.env` 也能以本地模式运行。需要调整上传限制、保留时间或启用联网模型时，将 `platform/.env.example` 复制为 `platform/.env` 并修改；`.env` 和密钥不得提交到 Git。
+
+常用开关：
+
+- `GUARDIANHUB_PRIVACY_ENGINE`：`ocr` / `agent` / `hybrid` / `vision_api`
+- `GUARDIANHUB_CODE_ENGINE`：`rule` / `deepseek`
+- `GUARDIANHUB_QWEN_ENABLED`：Qwen VL 总开关，默认 `false`
+- `GUARDIANHUB_DEEPSEEK_ENABLED`：DeepSeek 总开关，默认 `false`
+- `GUARDIANHUB_DEMO_MODE`：固定演示数据开关，默认 `false`
 
 ## 验证
 
-```bash
-cd platform/backend
+```powershell
+cd platform\backend
 python -m pip install -r requirements-dev.txt
 python -m pytest
 
-cd ../frontend
-npm run build      # tsc --noEmit + vite build
-npm run test       # vitest
+cd ..\frontend
+npm test
+npm run build
+
+cd ..\harmony
+.\build.ps1
 ```
 
-仓库已配置 GitHub Actions，在推送和拉取请求时执行后端测试与前端构建。
+## 初赛材料
 
-## 设计边界
+- [800 字项目介绍](platform/docs/初赛800字介绍.md)
+- [完整项目介绍](platform/docs/项目介绍文档.md)
+- [接口文档](platform/docs/接口文档.md)
+- [5 分钟展示文稿](platform/docs/展示.md)
+- [初赛冲刺计划](platform/docs/2026鸿蒙高校创新赛初赛冲刺计划.md)
+- [演示样本说明](platform/samples/README.md)
 
-- OCR、二维码、人脸和规则检测都可在本机运行，不强制依赖付费大模型 API。
-- Code Guardian 面向单文件和代码片段，尚不是完整的 SAST 或依赖漏洞扫描器（项目级 zip 扫描为后续扩展）。
-- 图片检测中的人脸识别为可选能力，需自行配置本地模型；「未命中规则」不等于绝对安全，界面会保留人工复核提示。
+## 源码压缩包建议
+
+初赛若要求提交“项目源码”，建议提交整个项目，而不是只提交 `harmony/`。源码包至少保留：
+
+- 根目录 `README.md`
+- `platform/harmony/`
+- `platform/backend/`
+- `platform/frontend/`
+- `platform/docs/`
+- `platform/.env.example`
+
+打包前排除 `.git/`、`.idea/`、`.hvigor/`、`.cache/`、`node_modules/`、`oh_modules/`、`build/`、`dist/`、`.env`、日志、SQLite 数据库和用户上传文件。HAP、作品说明 PDF 与演示视频按赛事提交入口要求作为独立产物上传，不要混入源码目录。
+
+## 安全边界
+
+- Code Guardian 的 ZIP 扫描只读文件，不解压落盘、不安装依赖、不执行代码；它是轻量静态规则检查，不等同于完整 SAST 或依赖漏洞扫描。
+- Link Guard 只做静态分析，不主动访问目标 URL，避免把检查服务变成 SSRF 入口。
+- 图片和材料设置大小、格式与数量限制；历史和上传产物默认保留 24 小时。
+- “未命中规则”不代表绝对安全，最终报告始终保留人工复核建议。

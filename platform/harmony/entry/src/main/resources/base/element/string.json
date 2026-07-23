@@ -1,0 +1,17 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "高校操作前安全中心"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "GuardianHub 主入口"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "GuardianHub"
+    }
+  ]
+}
+

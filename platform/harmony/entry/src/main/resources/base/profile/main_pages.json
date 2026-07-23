@@ -1,0 +1,10 @@
+{
+  "src": [
+    "pages/Index",
+    "pages/PrivacyPage",
+    "pages/CodePage",
+    "pages/LinkPage",
+    "pages/DocPage"
+  ]
+}
+

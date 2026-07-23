@@ -12,8 +12,12 @@ __pycache__/
 *.log
 .pytest_tmp*/
 **/.pytest_tmp*/
+.cache/
+**/.cache/
+.artifacts/
 local.properties
 *.hap
 *.hsp
 *.har
-_archive/codex-work/work/*.log
+_archive/
+platform/samples/generated/
