@@ -149,15 +149,31 @@ export async function fixCode(
   code: string,
   language: string,
   items: Array<{type: string, title: string, line?: number | null, snippet: string}>,
-  recordId?: string,
+  recordId?: string | null,
   originalScore?: number,
   totalVulns?: number,
 ): Promise<{fixedCode: string}> {
-  const response = await fetchWithTimeout(`${API_BASE_URL}/api/code/fix`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code, language, items, recordId, originalScore, totalVulns })
-  });
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}/api/code/fix`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code,
+        language: language === 'auto' ? 'python' : language,
+        items: items.map((item) => ({
+          type: item.type,
+          title: item.title,
+          line: item.line ?? null,
+          snippet: item.snippet ?? ''
+        })),
+        recordId: recordId || undefined,
+        originalScore: originalScore ?? 0,
+        totalVulns: totalVulns ?? items.length
+      })
+    },
+    120_000
+  );
   return parseResponse<{fixedCode: string}>(response);
 }
 

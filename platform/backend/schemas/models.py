@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 RiskLevel = Literal["high", "medium", "low"]
 MaskType = Literal["black", "blur", "mosaic"]
-DetectorMode = Literal["agent", "hybrid", "vision_api", "ocr", "demo", "unavailable"]
+DetectorMode = Literal["agent", "hybrid", "vision_api", "ocr", "demo", "unavailable", "deepseek"]
 
 
 class Box(BaseModel):
@@ -24,7 +24,7 @@ class PrivacyItem(BaseModel):
     box: Box
     suggestion: str
     confidence: float = Field(default=1.0, ge=0, le=1)
-    source: Literal["ocr", "qr", "face", "rule", "vision_api", "demo"] = "rule"
+    source: Literal["ocr", "qr", "face", "rule", "vision_api", "demo", "deepseek"] = "rule"
     recommendedMaskType: MaskType = "mosaic"
 
 
@@ -226,11 +226,46 @@ class DocCheckResponse(BaseModel):
     suggestions: List[str]
 
 
+class DocReputationQuery(BaseModel):
+    """One file's metadata for a reputation lookup.
+
+    Deliberately metadata-only: the device never uploads file content, so this
+    is the ceiling of what a cloud check can be given.
+    """
+
+    sha256: str = Field(min_length=64, max_length=64)
+    fileName: Optional[str] = Field(default=None, max_length=260)
+    declaredExtension: Optional[str] = Field(default=None, max_length=20)
+    detectedType: Optional[str] = Field(default=None, max_length=80)
+    localVerdict: Literal["clean", "suspicious", "malicious", "unknown"] = "unknown"
+    # Domains, URLs and addresses the device extracted.
+    indicators: List[str] = Field(default_factory=list, max_length=200)
+
+
+class DocReputationRequest(BaseModel):
+    files: List[DocReputationQuery] = Field(min_length=1, max_length=32)
+
+
+class DocReputationResult(BaseModel):
+    sha256: str
+    known: bool = False
+    family: Optional[str] = None
+    confidence: int = 0
+    notes: List[str] = Field(default_factory=list)
+
+
+class DocReputationResponse(BaseModel):
+    feedVersion: str
+    entries: int
+    results: List[DocReputationResult]
+    message: str
+
+
 class CodeFixRequest(BaseModel):
     code: str = Field(min_length=1, max_length=50000)
     language: str = Field(default="python", max_length=50)
     items: list[dict] = Field(default_factory=list)
-    recordId: str = ""
+    recordId: Optional[str] = None
     originalScore: int = 0
     totalVulns: int = 0
 

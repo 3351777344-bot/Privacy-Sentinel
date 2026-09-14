@@ -49,12 +49,14 @@ export interface CodeAnalyzeResponse {
   vulnerabilities: CodeVulnerability[];
   suggestions: string[];
   shouldSubmit: boolean;
-  scanMode: 'single' | 'project';
+  detectorSource?: 'rule' | 'deepseek';
+  deepseekWarning?: string;
+  scanMode?: 'single' | 'project';
   projectName?: string;
-  totalEntries: number;
-  scannedFiles: number;
-  skippedFiles: number;
-  topRiskFiles: CodeProjectFileSummary[];
+  totalEntries?: number;
+  scannedFiles?: number;
+  skippedFiles?: number;
+  topRiskFiles?: CodeProjectFileSummary[];
 }
 
 export interface LinkCheckItem {
@@ -84,10 +86,25 @@ export interface DocCheckItem {
   riskLevel: RiskLevel;
 }
 
+/**
+ * The rule set the server actually extracted from the brief. Echoing this back
+ * is what lets a user see *which* requirement a report was produced from —
+ * previously the report carried no trace of it.
+ */
+export interface ParsedRequirements {
+  formats: string[];
+  namingRule: string | null;
+  requiredMaterials: string[];
+  lengthRequirement: string | null;
+  deadline: string | null;
+  rawText: string;
+}
+
 export interface DocCheckResponse {
   riskLevel: RiskLevel;
   score: number;
   summary: string;
+  parsedRequirements: ParsedRequirements;
   checks: DocCheckItem[];
   suggestions: string[];
 }
@@ -105,6 +122,8 @@ export interface DetectResponse {
   score: number;
   summary: string;
   items: PrivacyItem[];
+  detectorMode?: string;
+  detectorMessage?: string;
 }
 
 export interface PrivacyProcessResponse {

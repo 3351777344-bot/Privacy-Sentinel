@@ -344,7 +344,7 @@ export default function App() {
       const latestCode = history.find((r) => r.module === 'code');
       const result = await fixCode(
         codeText,
-        codeLanguage,
+        codeResult?.language || codeLanguage,
         items,
         latestCode?.recordId,
         codeResult?.score ?? 100,

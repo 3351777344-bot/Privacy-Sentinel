@@ -1,6 +1,8 @@
 import { common } from '@kit.AbilityKit';
+import { picker } from '@kit.CoreFileKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { AppHeader } from '../components/AppHeader';
+import { ProcessingMode, ProcessingModeSelector } from '../components/ProcessingModeSelector';
 import { ResultPanel } from '../components/ResultPanel';
 import { SectionCard } from '../components/SectionCard';
 import { DetectResponse, Finding, PrivacyItem, PrivacyProcessResponse } from '../models/SecurityModels';
@@ -22,12 +24,28 @@ struct PrivacyPage {
   @State processedImageUri: string = '';
   @State statusMessage: string = '尚未选择图片';
   @State scanning: boolean = false;
+  @State processingMode: ProcessingMode = 'online';
 
   private abilityContext(): common.UIAbilityContext {
     return this.getUIContext().getHostContext() as common.UIAbilityContext;
   }
 
-  private async pickAndDetect(): Promise<void> {
+  private async pickFromFiles(): Promise<void> {
+    try {
+      const options = new picker.DocumentSelectOptions();
+      options.fileSuffixFilters = ['图片|.png,.jpg,.jpeg,.webp,.bmp,.gif'];
+      options.maxSelectNumber = 1;
+      const result = await new picker.DocumentViewPicker().select(options);
+      if (result.length === 0) {
+        return;
+      }
+      await this.detectSelectedImage(result[0], this.fileNameFromUri(result[0]));
+    } catch (error) {
+      this.statusMessage = this.errorMessage(error, '未能打开文件选择器');
+    }
+  }
+
+  private async pickFromAlbum(): Promise<void> {
     try {
       const options = new photoAccessHelper.PhotoSelectOptions();
       options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
@@ -36,15 +54,30 @@ struct PrivacyPage {
       if (selection.photoUris.length === 0) {
         return;
       }
-      this.imageUri = selection.photoUris[0];
-      this.imageName = this.fileNameFromUri(this.imageUri);
-      this.hasImage = true;
-      this.processed = false;
-      this.processedImageUri = '';
-      this.scanning = true;
-      this.statusMessage = '正在进行 OCR、二维码和隐私规则检测…';
+      await this.detectSelectedImage(
+        selection.photoUris[0],
+        this.fileNameFromUri(selection.photoUris[0])
+      );
+    } catch (error) {
+      this.statusMessage = this.errorMessage(error, '未能打开系统相册');
+    }
+  }
+
+  private async detectSelectedImage(imageUri: string, imageName: string): Promise<void> {
+    this.imageUri = imageUri;
+    this.imageName = imageName;
+    this.hasImage = true;
+    this.processed = false;
+    this.processedImageUri = '';
+    this.imageId = '';
+    this.findings = [];
+    this.scanning = true;
+    this.statusMessage = this.processingMode === 'online' ?
+      '正在进行本地检测，并调用 Qwen 联网增强…' :
+      '正在进行 OCR、二维码和隐私规则检测…';
+    try {
       const report: DetectResponse =
-        await GuardianApi.detectPrivacy(this.imageUri, this.imageName);
+        await GuardianApi.detectPrivacy(this.imageUri, this.imageName, this.processingMode);
       await this.applyReport(report);
     } catch (error) {
       this.statusMessage = this.errorMessage(error, '图片检测失败');
@@ -60,9 +93,11 @@ struct PrivacyPage {
     this.processed = false;
     this.processedImageUri = '';
     this.scanning = true;
-    this.statusMessage = '正在载入演示图片并执行真实隐私检测…';
+    this.statusMessage = this.processingMode === 'online' ?
+      '正在载入演示图，并调用 Qwen 联网增强…' :
+      '正在载入演示图片并执行真实隐私检测…';
     try {
-      const report = await GuardianApi.detectPrivacyDemo();
+      const report = await GuardianApi.detectPrivacyDemo(this.processingMode);
       await this.applyReport(report);
     } catch (error) {
       this.statusMessage = this.errorMessage(error, '演示图片检测失败');
@@ -82,7 +117,11 @@ struct PrivacyPage {
         riskLevel: item.riskLevel
       };
     });
-    this.statusMessage = report.summary;
+    const modeHint = report.detectorMode ? ` · 引擎 ${report.detectorMode}` : '';
+    this.statusMessage = `${report.summary}${modeHint}`;
+    if (report.detectorMessage && report.detectorMessage.length > 0) {
+      this.statusMessage = `${this.statusMessage}\n${report.detectorMessage}`;
+    }
     await HistoryStore.add(this.abilityContext(), {
       module: 'privacy',
       moduleLabel: '隐私哨兵',
@@ -178,9 +217,17 @@ struct PrivacyPage {
         Column() {
           SectionCard({
             title: '01 选择图片',
-            copy: '通过系统相册选择图片，再调用私有服务完成 OCR、二维码定位和隐私风险识别。'
+            copy: '可直接从手机文件选图，不必先导入系统相册；默认联网增强会调用 Qwen。'
           }) {
-            Button(this.scanning ? '处理中…' : (this.hasImage ? '重新选择图片' : '从系统相册选择图片'))
+            ProcessingModeSelector({
+              mode: this.processingMode,
+              onlineHint: 'Qwen 增强识别',
+              onModeChange: (mode: ProcessingMode) => {
+                this.processingMode = mode;
+              }
+            })
+
+            Button(this.scanning ? '处理中…' : (this.hasImage ? '重新从文件选择' : '从手机文件选择图片'))
               .enabled(!this.scanning)
               .width('100%')
               .height(46)
@@ -188,8 +235,22 @@ struct PrivacyPage {
               .fontColor('#FFFFFF')
               .backgroundColor(this.scanning ? '#94A3B8' : '#2563EB')
               .borderRadius(13)
+              .margin({ top: 12 })
               .onClick(() => {
-                this.pickAndDetect();
+                this.pickFromFiles();
+              })
+
+            Button(this.scanning ? '处理中…' : '从系统相册选择')
+              .enabled(!this.scanning)
+              .width('100%')
+              .height(42)
+              .fontSize(13)
+              .fontColor('#334155')
+              .backgroundColor('#F1F5F9')
+              .borderRadius(12)
+              .margin({ top: 10 })
+              .onClick(() => {
+                this.pickFromAlbum();
               })
 
             Button(this.scanning ? '处理中…' : '加载内置演示图')

@@ -1,0 +1,106 @@
+{
+  "_readme": [
+    "Shared contract for requirement-driven naming and format checks.",
+    "The on-device ArkTS checker (platform/harmony/entry/src/main/ets/services/scanners/NamingTemplate.ets)",
+    "and the server checker (platform/backend/modules/doc_shield/format_checker.py) MUST agree on every",
+    "case below. Both test suites read this file, so a behaviour change on one side fails the other side's",
+    "tests instead of silently diverging.",
+    "",
+    "Problem codes are asserted as a sorted set, so ordering never matters:",
+    "  empty-segment  the filename has a stray separator (leading, trailing or doubled)",
+    "  segment-count  the filename has a different number of segments than the template",
+    "  field:<kind>   that segment does not look like its declared kind",
+    "  separator      the filename does not contain the separator the template asks for",
+    "  extension      the filename extension differs from the one in the template",
+    "",
+    "empty-segment and segment-count are mutually exclusive.",
+    "",
+    "Two separator classes, and the tests below depend on the difference:",
+    "  file separators  _ - — －          may be demanded of a filename",
+    "  list separators  、 ， , +          only split a rule that lists its fields",
+    "So `学号、姓名、课程名称` is a three-field template demanding no separator at",
+    "all, while `学号_姓名_课程名称` demands `_`."
+  ],
+
+  "namingRuleExtract": [
+    { "text": "提交课程论文 PDF、封面和签字承诺书；文件名使用学号_姓名_课程名称。", "rule": "学号_姓名_课程名称" },
+    { "text": "请提交 PDF；命名规则：学号_姓名_课程名称。", "rule": "学号_姓名_课程名称" },
+    { "text": "请提交 PDF；文件命名：学号_姓名_课程名称。", "rule": "学号_姓名_课程名称" },
+    { "text": "命名规则：学号-姓名-课程名称", "rule": "学号-姓名-课程名称" },
+    { "text": "文件名必须严格等于 学号_姓名_课程名称.pdf", "rule": "学号_姓名_课程名称.pdf" },
+    { "text": "按 学号_姓名_课程名称 命名", "rule": "学号_姓名_课程名称" },
+    { "text": "命名格式为 学号_姓名", "rule": "学号_姓名" },
+    { "text": "命名规则：只要一张图片", "rule": "只要一张图片" },
+    { "text": "文件名使用学号、姓名、课程名称。", "rule": "学号、姓名、课程名称" },
+    { "text": "文件名使用学号，姓名，课程名称。", "rule": "学号，姓名，课程名称" },
+    { "text": "文件名使用学号，其它材料另附。", "rule": "学号" },
+    { "text": "请提交论文和相关材料", "rule": "" },
+    { "text": "提交 PDF 报告，正文不少于 3000 字。", "rule": "" }
+  ],
+
+  "namingTemplateParse": [
+    { "rule": "学号_姓名_课程名称", "recognised": true, "separator": "_", "kinds": ["studentId", "name", "course"], "extension": "" },
+    { "rule": "学号-姓名-课程名称", "recognised": true, "separator": "-", "kinds": ["studentId", "name", "course"], "extension": "" },
+    { "rule": "学号_姓名_课程名称.pdf", "recognised": true, "separator": "_", "kinds": ["studentId", "name", "course"], "extension": "pdf" },
+    { "rule": "学号_姓名", "recognised": true, "separator": "_", "kinds": ["studentId", "name"], "extension": "" },
+    { "rule": "学号_姓名_课程名称_序号", "recognised": true, "separator": "_", "kinds": ["studentId", "name", "course", "serial"], "extension": "" },
+    { "rule": "学生姓名_学号", "recognised": true, "separator": "_", "kinds": ["name", "studentId"], "extension": "" },
+    { "rule": "班级_姓名_实验名称", "recognised": true, "separator": "_", "kinds": ["class", "name", "any"], "extension": "" },
+    { "rule": "专业_学号_姓名_日期", "recognised": true, "separator": "_", "kinds": ["major", "studentId", "name", "date"], "extension": "" },
+    { "rule": "学号-姓名_课程名称", "recognised": true, "separator": "-", "kinds": ["studentId", "name", "course"], "extension": "" },
+    { "rule": "学号", "recognised": true, "separator": "", "kinds": ["studentId"], "extension": "" },
+    { "rule": "只要一张图片", "recognised": false },
+    { "rule": "报告", "recognised": false },
+    { "rule": "文件名", "recognised": false },
+    { "rule": "学号、姓名、课程名称", "recognised": true, "separator": "", "kinds": ["studentId", "name", "course"], "extension": "" },
+    { "rule": "学号，姓名，课程名称", "recognised": true, "separator": "", "kinds": ["studentId", "name", "course"], "extension": "" },
+    { "rule": "学号+姓名", "recognised": true, "separator": "", "kinds": ["studentId", "name"], "extension": "" },
+    { "rule": "学号_姓名_课程名称、序号", "recognised": true, "separator": "_", "kinds": ["studentId", "name", "course", "serial"], "extension": "" }
+  ],
+
+  "namingCheck": [
+    { "rule": "学号_姓名_课程名称", "file": "2024001_张三_数据结构.pdf", "ok": true, "problems": [] },
+    { "rule": "学号_姓名_课程名称", "file": "2024001_张三_数据结构.docx", "ok": true, "problems": [] },
+    { "rule": "学号_姓名_课程名称", "file": "2024001_张三.pdf", "ok": false, "problems": ["segment-count"] },
+    { "rule": "学号_姓名_课程名称", "file": "2024001_张三_数据结构_额外.pdf", "ok": false, "problems": ["segment-count"] },
+    { "rule": "学号_姓名_课程名称", "file": "张三_2024001_数据结构.pdf", "ok": false, "problems": ["field:name", "field:studentId"] },
+    { "rule": "学号_姓名_课程名称", "file": "2024001-张三-数据结构.pdf", "ok": false, "problems": ["separator"] },
+    { "rule": "学号_姓名_课程名称", "file": "123_张三_数据结构.pdf", "ok": false, "problems": ["field:studentId"] },
+    { "rule": "学号_姓名_课程名称", "file": "2024001_张_数据结构.pdf", "ok": false, "problems": ["field:name"] },
+    { "rule": "学号_姓名_课程名称", "file": "2024001_张三_12345.pdf", "ok": false, "problems": ["field:course"] },
+    { "rule": "学号_姓名_课程名称", "file": "随便起个名.pdf", "ok": false, "problems": ["segment-count", "separator"] },
+    { "rule": "学号_姓名_课程名称", "file": "_123456_张三_随便.pdf", "ok": false, "problems": ["empty-segment"] },
+    { "rule": "学号_姓名_课程名称", "file": "2024001__张三_数据结构.pdf", "ok": false, "problems": ["empty-segment"] },
+    { "rule": "学号_姓名_课程名称", "file": "2024001_张三_数据结构_.pdf", "ok": false, "problems": ["empty-segment"] },
+
+    { "rule": "学号、姓名、课程名称", "file": "2024001_张三_数据结构.pdf", "ok": true, "problems": [] },
+    { "rule": "学号、姓名、课程名称", "file": "随便起个名.pdf", "ok": false, "problems": ["segment-count"] },
+
+    { "rule": "学号_姓名_课程名称.pdf", "file": "2024001_张三_数据结构.pdf", "ok": true, "problems": [] },
+    { "rule": "学号_姓名_课程名称.pdf", "file": "2024001_张三_数据结构.docx", "ok": false, "problems": ["extension"] },
+
+    { "rule": "学号-姓名-课程名称", "file": "2024001-张三-数据结构.pdf", "ok": true, "problems": [] },
+    { "rule": "学号-姓名-课程名称", "file": "2024001_张三_数据结构.pdf", "ok": false, "problems": ["separator"] },
+
+    { "rule": "班级_姓名_实验名称", "file": "计科2101_张三_冒泡排序.pdf", "ok": true, "problems": [] },
+    { "rule": "班级_姓名_实验名称", "file": "计科2101_张三.pdf", "ok": false, "problems": ["segment-count"] },
+
+    { "rule": "学号_姓名", "file": "2024001_张三.pdf", "ok": true, "problems": [] },
+    { "rule": "学号_姓名", "file": "2024001_张三_数据结构.pdf", "ok": false, "problems": ["segment-count"] },
+
+    { "rule": "学号", "file": "2024001.pdf", "ok": true, "problems": [] },
+    { "rule": "学号", "file": "2024001_张三.pdf", "ok": false, "problems": ["segment-count"] },
+
+    { "rule": "只要一张图片", "file": "随便起个名.pdf", "recognised": false }
+  ],
+
+  "formatCheck": [
+    { "formats": ["pdf"], "files": ["a.pdf"], "missing": [], "offList": [] },
+    { "formats": ["pdf"], "files": ["a.docx"], "missing": ["pdf"], "offList": ["a.docx"] },
+    { "formats": ["pdf"], "files": ["a.pdf", "b.png"], "missing": [], "offList": ["b.png"] },
+    { "formats": ["pdf", "png"], "files": ["a.pdf"], "missing": ["png"], "offList": [] },
+    { "formats": ["ppt"], "files": ["a.pptx"], "missing": [], "offList": [] },
+    { "formats": ["docx"], "files": ["a.doc"], "missing": [], "offList": [] },
+    { "formats": ["zip"], "files": ["a.rar"], "missing": [], "offList": [] }
+  ]
+}

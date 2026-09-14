@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -7,7 +11,9 @@ from config import settings
 from modules.risk_scoring import calculate_security_score, highest_risk
 from schemas.models import Box, DetectResponse, PrivacyItem
 
-from .privacy_detector import detect_privacy_items as detect_with_local_rules
+from .privacy_detector import detect_privacy_items as detect_with_local_rules, _run_ocr
+
+logger = logging.getLogger(__name__)
 
 
 MASK_BY_TYPE = {
@@ -109,9 +115,9 @@ def detect_privacy_items(
     if processing_mode == "local":
         engine = "agent"
     elif processing_mode == "online":
-        engine = "hybrid"
+        engine = "deepseek" if settings.deepseek_enabled else "hybrid"
 
-    if engine not in {"agent", "hybrid", "vision_api"} or settings.demo_mode:
+    if engine not in {"agent", "deepseek", "hybrid", "vision_api"} or settings.demo_mode:
         return base_result.model_copy(update={"items": [_enrich_item(item, engine) for item in base_result.items]})
 
     with Image.open(image_path) as image:
@@ -119,6 +125,9 @@ def detect_privacy_items(
 
     if engine == "vision_api":
         return _detect_vision_api(base_result, image_path, image_id, original_url, width, height)
+
+    if engine == "deepseek":
+        return _detect_deepseek(base_result, image_path, image_id, original_url, width, height)
 
     if engine == "hybrid":
         return _detect_hybrid(base_result, image_path, image_id, original_url, width, height)
@@ -158,6 +167,87 @@ def _detect_agent(
             "score": calculate_security_score(levels),
             "summary": summary,
         }
+    )
+
+
+def _detect_deepseek(
+    base_result: DetectResponse,
+    image_path: str,
+    image_id: str,
+    original_url: str,
+    width: int,
+    height: int,
+) -> DetectResponse:
+    """OCR locally, then send the OCR text to DeepSeek for privacy analysis.
+
+    This is the text-only-LLM-friendly path. DeepSeek gets structured text
+    rather than raw pixels; bounding boxes come from the local OCR pass.
+    """
+    from .deepseek_privacy import analyze_ocr_text
+
+    local_items = [_enrich_item(item) for item in base_result.items]
+
+    try:
+        texts, boxes, scores = _run_ocr(image_path, width, height)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("OCR pass failed before DeepSeek: %s", exc)
+        texts, boxes, scores = [], [], []
+
+    deepseek_items, deepseek_error = analyze_ocr_text(
+        texts, boxes, scores, width, height, image_id,
+    )
+
+    seen = {(item.type, re.sub(r"\s+", "", item.text.lower())) for item in local_items}
+    merged = list(local_items)
+    for item in deepseek_items:
+        key = (item.type, re.sub(r"\s+", "", item.text.lower()))
+        if key in seen:
+            continue
+        merged.append(item)
+        seen.add(key)
+
+    levels = [item.riskLevel for item in merged]
+    labels = ", ".join(dict.fromkeys(item.label for item in merged))
+    if deepseek_items:
+        summary = (
+            f"DeepSeek 文本分析在 {len(texts)} 段 OCR 文字中发现 {len(deepseek_items)} 个隐私项"
+            f"（{labels}），结合本地 OCR 共 {len(merged)} 个区域。"
+        )
+        detector_message = (
+            f"DeepSeek mode: 本地 OCR ({settings.ocr_engine}) 提取文字 → "
+            f"DeepSeek ({settings.deepseek_model}) 文本分析。"
+        )
+    elif deepseek_error:
+        summary = (
+            f"DeepSeek 分析失败：{deepseek_error}仅依赖本地 OCR 结果。"
+        )
+        detector_message = (
+            f"DeepSeek mode: 本地 OCR 正常 ({settings.ocr_engine})，"
+            f"DeepSeek ({settings.deepseek_model}) 调用失败。"
+        )
+    elif texts:
+        summary = (
+            f"DeepSeek 在 {len(texts)} 段 OCR 文字中未识别到额外隐私项，"
+            f"本地 OCR 命中 {len(local_items)} 项。"
+        )
+        detector_message = (
+            f"DeepSeek mode: 本地 OCR ({settings.ocr_engine}) + "
+            f"DeepSeek ({settings.deepseek_model}) 文本分析。"
+        )
+    else:
+        summary = base_result.summary
+        detector_message = base_result.detectorMessage
+
+    return DetectResponse(
+        imageId=image_id,
+        originalUrl=original_url,
+        originalImageUrl=original_url,
+        riskLevel=highest_risk(levels) if merged else base_result.riskLevel,
+        score=calculate_security_score(levels) if merged else base_result.score,
+        summary=summary,
+        detectorMode="deepseek",
+        detectorMessage=detector_message,
+        items=merged,
     )
 
 

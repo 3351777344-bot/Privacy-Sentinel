@@ -2,6 +2,13 @@ import re
 from typing import Any
 
 from .file_extractor import ExtractedFile
+from .naming_template import (
+    NamingTemplate,
+    check_naming,
+    describe_problems,
+    describe_template,
+    parse_naming_template,
+)
 
 
 BAD_NAME_PATTERNS = [
@@ -27,22 +34,52 @@ def _accepted_extensions(required_format: str) -> set[str]:
     return FORMAT_EXTENSION_GROUPS.get(required_format, {required_format})
 
 
-def _check_naming_rule(file_name: str, naming_rule: str | None) -> tuple[bool, list[str]]:
+def _naming_check(file_name: str, naming_rule: str | None) -> dict[str, Any]:
+    """Build the naming-rule check row for one file.
+
+    Four outcomes, deliberately distinguished rather than collapsed into
+    "pass": an absent rule, a rule that cannot be read as a template, a
+    conforming name, and a violation. Rules such as `只要一张图片` used to pass
+    every file silently; they are now reported as needing manual confirmation.
+    """
     if not naming_rule:
-        return True, []
+        return {
+            "category": "format",
+            "label": "未指定命名规则",
+            "evidence": "提交要求中没有给出命名规则，未做文件名校验。",
+            "riskLevel": "low",
+            "status": "pass",
+        }
 
-    stem = file_name.rsplit(".", 1)[0]
-    problems: list[str] = []
-    if "学号" in naming_rule and not re.search(r"\d{6,}", stem):
-        problems.append("缺少疑似学号")
-    if "姓名" in naming_rule and not re.search(r"[\u4e00-\u9fa5]{2,}|[A-Za-z]{2,}", stem):
-        problems.append("缺少疑似姓名")
-    if ("-" in naming_rule or "—" in naming_rule) and "-" not in stem:
-        problems.append("命名规则要求使用连字符")
-    if "_" in naming_rule and "_" not in stem:
-        problems.append("命名规则要求使用下划线")
+    template: NamingTemplate = parse_naming_template(naming_rule)
+    if not template.recognised:
+        return {
+            "category": "format",
+            "label": "命名规则需人工确认",
+            "evidence": f"「{naming_rule}」无法解析为可校验的命名模板，"
+                        "未做自动校验。写成 学号_姓名_课程名称 这样的分段模板才能自动校验。",
+            "riskLevel": "medium",
+            "status": "warning",
+        }
 
-    return len(problems) == 0, problems
+    result = check_naming(file_name, template)
+    if result.ok:
+        return {
+            "category": "format",
+            "label": "文件命名符合要求",
+            "evidence": f"{file_name}（模板 {describe_template(template)}）",
+            "riskLevel": "low",
+            "status": "pass",
+        }
+
+    problems = "；".join(describe_problems(result.problems, template))
+    return {
+        "category": "format",
+        "label": "文件命名不符合要求",
+        "evidence": f"{file_name}：{problems}。模板 {describe_template(template)}",
+        "riskLevel": "medium",
+        "status": "warning",
+    }
 
 
 def check_format(files: list[ExtractedFile], parsed_requirements: dict[str, Any]) -> list[dict[str, Any]]:
@@ -100,16 +137,7 @@ def check_format(files: list[ExtractedFile], parsed_requirements: dict[str, Any]
                 }
             )
 
-        ok, problems = _check_naming_rule(file.fileName, parsed_requirements.get("namingRule"))
-        checks.append(
-            {
-                "category": "format",
-                "label": "文件命名规则检查",
-                "evidence": file.fileName if ok else f"{file.fileName}：{'；'.join(problems)}",
-                "riskLevel": "low" if ok else "medium",
-                "status": "pass" if ok else "warning",
-            }
-        )
+        checks.append(_naming_check(file.fileName, parsed_requirements.get("namingRule")))
 
         if file.status == "parse_failed":
             checks.append(

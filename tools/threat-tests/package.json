@@ -1,0 +1,6 @@
+{
+  "name": "doc-shield-l1-tests",
+  "private": true,
+  "type": "module",
+  "description": "Runs the on-device L1 scanner sources under plain Node for verification."
+}

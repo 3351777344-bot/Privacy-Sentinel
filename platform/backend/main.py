@@ -31,6 +31,7 @@ from modules.doc_shield.format_checker import check_format
 from modules.doc_shield.privacy_checker import check_privacy
 from modules.doc_shield.report_generator import generate_report
 from modules.doc_shield.requirement_parser import parse_requirement
+from modules.doc_shield.reputation import feed as threat_feed
 from modules.link_guard.analyzer import analyze_link as run_link_guard
 from modules.link_guard.qr_decoder import decode_qr_image
 from schemas.models import (
@@ -39,6 +40,9 @@ from schemas.models import (
     CodeFixResponse,
     DetectResponse,
     DocCheckResponse,
+    DocReputationRequest,
+    DocReputationResponse,
+    DocReputationResult,
     HistoryRecord,
     HistoryCreate,
     LinkCheckRequest,
@@ -527,6 +531,71 @@ async def check_doc(
     return result
 
 
+@app.post("/api/doc/reputation", response_model=DocReputationResponse)
+def doc_reputation(payload: DocReputationRequest) -> DocReputationResponse:
+    """L3 reputation lookup for Doc Shield.
+
+    Metadata only. The device sends a SHA-256 digest plus indicators it already
+    extracted locally; file content never reaches this service, and nothing in
+    the request is persisted.
+    """
+    results: list[DocReputationResult] = []
+    for query in payload.files:
+        digest = query.sha256.strip().lower()
+        notes: list[str] = []
+        known = False
+        family = None
+        confidence = 0
+
+        entry = threat_feed.lookup_hash(digest)
+        if entry is not None:
+            known = True
+            family = entry.get("family")
+            confidence = 95
+            if entry.get("note"):
+                notes.append(entry["note"])
+            if entry.get("source"):
+                notes.append(f"情报来源：{entry['source']}")
+            if entry.get("firstSeen"):
+                notes.append(f"首次收录：{entry['firstSeen']}")
+
+        matched = threat_feed.match_indicators(query.indicators)
+        if matched:
+            confidence = max(confidence, 70)
+            notes.append("命中情报黑名单的域名或地址：" + "、".join(matched[:5]))
+            if not known:
+                known = True
+                family = "关联已知恶意基础设施"
+
+        if not notes:
+            if query.localVerdict in ("suspicious", "malicious"):
+                notes.append("云端情报库暂无该文件的记录，请以端内检测结论为准。")
+            else:
+                notes.append("云端情报库暂无该文件的记录。")
+
+        results.append(
+            DocReputationResult(
+                sha256=digest,
+                known=known,
+                family=family,
+                confidence=confidence,
+                notes=notes,
+            )
+        )
+
+    if threat_feed.has_feed():
+        message = f"已比对情报库 {threat_feed.version}（{threat_feed.entries} 条）。"
+    else:
+        message = "云端情报库尚未配置，本次仅返回内置测试样本比对结果，请以端内检测为准。"
+
+    return DocReputationResponse(
+        feedVersion=threat_feed.version,
+        entries=threat_feed.entries,
+        results=results,
+        message=message,
+    )
+
+
 @app.post("/api/export/image/{image_id}")
 def export_image(image_id: str) -> FileResponse:
     processed_path = PROCESSED_DIR / f"{image_id}_safe.png"
@@ -589,9 +658,13 @@ Code to fix ({request.language}):
             new_score = min(100, request.originalScore + improvement)
             history_store.mark_processed(request.recordId, new_score)
 
+        fixed_code = result.get("fixed_code", "")
+        if not isinstance(fixed_code, str) or not fixed_code.strip():
+            raise HTTPException(status_code=502, detail="DeepSeek 未返回有效修复代码。")
+
         return CodeFixResponse(
-            fixedCode=result.get("fixed_code", ""),
-            explanation=result.get("explanation", ""),
+            fixedCode=fixed_code,
+            explanation=str(result.get("explanation", "") or ""),
             language=request.language,
         )
     except json.JSONDecodeError:

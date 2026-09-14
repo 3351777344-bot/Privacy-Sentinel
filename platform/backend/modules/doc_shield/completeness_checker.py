@@ -5,19 +5,24 @@ from typing import Any
 from .file_extractor import ExtractedFile
 
 
+# Deliberately narrow. The previous table made `课程名称` a synonym of `封面`
+# and `正文` a synonym of `报告`, so a document that merely mentioned
+# "课程名称：数据结构" was reported as "已提交封面" — a false pass on the most
+# commonly required material. Terms here should be genuine synonyms, not words
+# that merely tend to co-occur.
 MATERIAL_SYNONYMS = {
-    "封面": ["封面", "题目", "学院", "课程名称"],
+    "封面": ["封面", "cover"],
     "摘要": ["摘要", "abstract"],
-    "正文": ["正文", "引言", "一、", "1.", "研究内容"],
+    "正文": ["正文", "引言", "正文部分"],
     "参考文献": ["参考文献", "references", "bibliography"],
-    "源码": ["源码", "源代码", "代码", "src", "source"],
-    "源代码": ["源码", "源代码", "代码", "src", "source"],
-    "截图": ["截图", "运行截图", "界面截图", "png", "jpg", "jpeg"],
-    "PPT": ["ppt", "pptx", "演示文稿", "答辩"],
+    "源码": ["源码", "源代码", "src", "source"],
+    "源代码": ["源码", "源代码", "src", "source"],
+    "截图": ["截图", "运行截图", "界面截图", "运行结果"],
+    "PPT": ["ppt", "pptx", "演示文稿"],
     "答辩PPT": ["ppt", "pptx", "演示文稿", "答辩"],
-    "报告": ["报告", "课程论文", "正文"],
-    "课程论文": ["课程论文", "论文", "正文", "参考文献"],
-    "附件": ["附件", "附录"],
+    "报告": ["报告", "report"],
+    "课程论文": ["课程论文", "论文", "paper"],
+    "附件": ["附件", "附录", "appendix"],
 }
 
 

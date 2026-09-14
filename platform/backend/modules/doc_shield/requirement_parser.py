@@ -1,6 +1,8 @@
 import re
 from typing import Any
 
+from .naming_template import classify_label
+
 
 FORMAT_ALIASES = {
     "pdf": ["pdf"],
@@ -27,6 +29,114 @@ MATERIAL_KEYWORDS = [
     "报告",
     "附件",
 ]
+
+# Phrases that introduce a naming rule. Mirrors the ArkTS `extractNamingRule`
+# (`services/scanners/RequirementKeywords.ets`). `文件名使用` matters because the
+# bundled sample brief is written that way — without it the sample yields no
+# naming rule at all and the naming check silently never runs.
+NAMING_MARKERS = (
+    "命名规则", "文件命名", "命名格式", "文件名格式", "命名方式", "命名要求",
+    "文件名使用", "文件名须为", "文件名应为", "文件名必须", "文件名称为",
+)
+
+# Filler words stripped from the front of a captured naming rule.
+NAMING_FILLERS = (
+    "必须严格等于", "严格等于", "严格为", "必须为", "必须是", "须为", "应为",
+    "等于", "使用", "格式为", "为", "是",
+)
+
+# Characters that always end a naming rule.
+_NAMING_STOPS = ("\n", "。", "；", ";")
+
+# Comma-like characters: they end a rule unless another field follows.
+_NAMING_LIST_COMMAS = ("\uFF0C", ",")
+
+
+def _strip_naming_filler(captured: str) -> str:
+    out = captured.strip()
+    changed = True
+    while changed and out:
+        changed = False
+        if out[0] in (" ", ":", "：", "　"):
+            out = out[1:].strip()
+            changed = True
+            continue
+        for filler in NAMING_FILLERS:
+            if out.startswith(filler):
+                out = out[len(filler):].strip()
+                changed = True
+                break
+    return out
+
+
+def _index_of_any_delimiter(text: str) -> int:
+    """Earliest index of any rule delimiter, `-1` when there is none."""
+    found = [text.find(item) for item in _NAMING_STOPS + _NAMING_LIST_COMMAS]
+    found = [index for index in found if index >= 0]
+    return min(found) if found else -1
+
+
+def _collect_rule(rest: str) -> str:
+    """Read the rule out of everything that follows a marker.
+
+    `。`/`；`/newline always end it. A comma ends it too — unless the chunk
+    after the comma is another field label, because a brief may *list* the
+    fields that way (`文件名使用学号，姓名，课程名称`). Without that look-ahead
+    the rule would be read as just `学号` and every correctly named file would
+    then be reported as having the wrong segment count.
+    """
+    remaining = rest
+    kept = ""
+    for _ in range(12):
+        at = _index_of_any_delimiter(remaining)
+        if at < 0:
+            kept += remaining
+            break
+        delimiter = remaining[at]
+        head = remaining[:at]
+        if delimiter not in _NAMING_LIST_COMMAS:
+            kept += head
+            break
+        tail = remaining[at + 1:]
+        next_at = _index_of_any_delimiter(tail)
+        chunk = (tail[:next_at] if next_at >= 0 else tail).strip()
+        if chunk and classify_label(chunk) != "any":
+            kept += head + "\uFF0C"
+            remaining = tail
+            continue
+        kept += head
+        break
+    return _strip_naming_filler(kept)
+
+
+def extract_naming_rule(text: str) -> str:
+    """Extract the raw naming rule, `''` when the brief states none.
+
+    Substring/scan based rather than regex based so it matches the ArkTS
+    implementation, which avoids the regex features ArkTS rejects.
+    """
+    for marker in NAMING_MARKERS:
+        at = text.find(marker)
+        if at < 0:
+            continue
+        cleaned = _collect_rule(text[at + len(marker):])
+        if cleaned:
+            return cleaned
+
+    # `按照/按/以 <...> 命名`
+    by_at = max(text.rfind("按照"), text.rfind("按"), text.rfind("以"))
+    if by_at >= 0:
+        tail = text[by_at:]
+        named = tail.find("命名")
+        if named > 0:
+            middle = tail[:named]
+            lead = max(middle.find("按"), middle.find("以"))
+            if lead >= 0:
+                middle = middle[lead + 1:]
+            cleaned = _strip_naming_filler(middle)
+            if cleaned:
+                return cleaned
+    return ""
 
 
 def _unique(items: list[str]) -> list[str]:
@@ -55,16 +165,7 @@ def parse_requirement(requirement_text: str) -> dict[str, Any]:
     if "答辩PPT" in materials and "PPT" not in materials:
         materials.append("PPT")
 
-    naming_rule = None
-    naming_patterns = [
-        r"(?:命名规则|文件命名|命名格式|文件名格式)\s*[:：为是]?\s*([^\n，。；;]+)",
-        r"(?:按|按照|以)\s*([^\n，。；;]*(?:学号|姓名|班级|课程|论文|报告)[^\n，。；;]*)\s*(?:命名|作为文件名)",
-    ]
-    for pattern in naming_patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if match:
-            naming_rule = match.group(1).strip(" ：，。；;")
-            break
+    naming_rule = extract_naming_rule(text) or None
 
     length_requirement = None
     length_match = re.search(

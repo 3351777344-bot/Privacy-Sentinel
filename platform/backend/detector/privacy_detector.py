@@ -26,12 +26,18 @@ PRIVACY_PATTERNS = [
     ("order_no", "订单号", re.compile(r"(?:订单号?|order(?:\s*id)?)\s*[:：#-]?\s*[A-Z0-9_-]{6,}", re.IGNORECASE), "medium", "订单号可能被用于查询交易信息，建议按分享对象决定是否隐藏。"),
     ("address", "详细地址", re.compile(r"(?:住址|地址|收货地址)\s*[:：]?[^\n]{4,}|[\u4e00-\u9fff]{2,}(?:省|市|区|县)[^\n]{2,}(?:路|街|巷|号|楼|室)"), "high", "详细地址可能暴露住址或活动范围，建议完整打码。"),
     ("qr_code", "二维码", re.compile(r"二维码|QR\s*码|QR\s*code", re.IGNORECASE), "high", "二维码可能包含账号、订单或跳转信息，建议遮挡或确认内容后再分享。"),
+    # Server / infrastructure leak patterns (added for PHPinfo / config screenshots)
+    ("public_ip", "公网 IP 地址", re.compile(r"(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?::\d{2,5})?(?!\d)"), "medium", "公网 IP 可被用于端口扫描或网络攻击，建议遮盖。"),
+    ("server_path", "服务器本地路径", re.compile(r"[A-Za-z]:[\\/](?:[^\\/:\n\r*?<>\"| ]{1,40}[\\/]){2,}[^\\/:\n\r*?<>\"| ]{1,40}"), "medium", "服务器本地路径会暴露文件系统结构，建议遮盖。"),
+    ("phpinfo_link", "phpinfo 入口", re.compile(r"phpinfo\s*\(\s*\)|phpinfo\(O|phpMyAdmin|/admin|\.env", re.IGNORECASE), "high", "phpinfo / phpMyAdmin / 管理后台链接可能被攻击者利用，建议确认安全后再分享。"),
+    ("db_password", "数据库账号", re.compile(r"(?:root|admin|sa|postgres|mysql|user|password|密码)\s*[:：]?\s*[\w@#$%^&*]{2,}", re.IGNORECASE), "high", "数据库账号或密码字段会被攻击者直接利用，建议立即打码。"),
+    ("software_version", "软件版本与平台组合", re.compile(r"(?:Apache|nginx|PHP|MySQL|Redis|OpenSSH|Tomcat|Windows|Linux|Ubuntu|CentOS)[\\/ ]?[\w.]+(?:\s*\([^)]+\))?", re.IGNORECASE), "low", "软件版本+平台组合可被攻击者用来查找已知漏洞，建议遮盖。"),
 ]
 
 
 @lru_cache(maxsize=1)
 def _ocr_engine() -> Any:
-    from rapidocr import RapidOCR
+    from rapidocr_onnxruntime import RapidOCR
 
     return RapidOCR()
 
@@ -224,17 +230,33 @@ def _run_ocr(image_path: str, image_width: int, image_height: int) -> tuple[list
 
     with _OCR_LOCK:
         result = _ocr_engine()(ocr_input)
-    if result is None or result.boxes is None:
+    if result is None:
+        return [], [], []
+    # rapidocr_onnxruntime returns (detections, timing). Each detection is [box, text, score].
+    detections = result[0] if isinstance(result, tuple) else result
+    if not detections:
         return [], [], []
 
-    texts = list(result.txts) if result.txts is not None else []
-    scores = [float(score) for score in result.scores] if result.scores is not None else []
+    texts: list[str] = []
     boxes: list[Any] = []
-    for points in result.boxes:
-        if scale == 1.0:
-            boxes.append(points)
+    scores: list[float] = []
+    for detection in detections:
+        if not isinstance(detection, (list, tuple)) or len(detection) < 3:
             continue
-        boxes.append([[float(x) / scale, float(y) / scale] for x, y in points])
+        raw_text = detection[1]
+        if not isinstance(raw_text, str) or not raw_text.strip():
+            continue
+        raw_score = detection[2]
+        try:
+            score = float(raw_score)
+        except (TypeError, ValueError):
+            continue
+        texts.append(raw_text)
+        scores.append(score)
+        if scale == 1.0:
+            boxes.append(detection[0])
+        else:
+            boxes.append([[float(x) / scale, float(y) / scale] for x, y in detection[0]])
     return texts, boxes, scores
 
 

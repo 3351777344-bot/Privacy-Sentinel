@@ -32,6 +32,28 @@ export class ProcessedImageService {
     }
   }
 
+  static async saveBufferToGallery(
+    context: common.UIAbilityContext,
+    imageData: ArrayBuffer,
+    title: string
+  ): Promise<void> {
+    const cachedUri = await ProcessedImageService.cache(context, imageData);
+    try {
+      const helper = photoAccessHelper.getPhotoAccessHelper(context);
+      await helper.showAssetsCreationDialog(
+        [cachedUri],
+        [{
+          title: title,
+          fileNameExtension: 'png',
+          photoType: photoAccessHelper.PhotoType.IMAGE
+        }]
+      );
+    } catch (error) {
+      const typedError = error as Error;
+      throw new Error(typedError.message || '系统相册保存失败。');
+    }
+  }
+
   static async saveToGallery(context: common.UIAbilityContext, cachedUri: string): Promise<void> {
     try {
       const helper = photoAccessHelper.getPhotoAccessHelper(context);

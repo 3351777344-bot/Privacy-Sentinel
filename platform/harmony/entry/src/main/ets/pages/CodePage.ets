@@ -1,18 +1,16 @@
 import { common } from '@kit.AbilityKit';
 import { picker } from '@kit.CoreFileKit';
 import { AppHeader } from '../components/AppHeader';
+import { ProcessingMode, ProcessingModeSelector } from '../components/ProcessingModeSelector';
 import { ResultPanel } from '../components/ResultPanel';
 import { SectionCard } from '../components/SectionCard';
 import {
   CodeAnalyzeResponse,
   CodeVulnerability,
-  Finding,
-  RiskLevel,
-  ScanReport
+  Finding
 } from '../models/SecurityModels';
 import { GuardianApi } from '../services/GuardianApi';
 import { HistoryStore } from '../services/HistoryStore';
-import { LocalRuleEngine } from '../services/LocalRuleEngine';
 
 @Entry
 @Component
@@ -27,33 +25,58 @@ struct CodePage {
   @State archiveName: string = '';
   @State archiveStatus: string = '尚未选择项目包';
   @State scanningArchive: boolean = false;
+  @State scanningSnippet: boolean = false;
+  @State snippetStatus: string = '默认联网增强会调用 DeepSeek；ZIP 项目包为保护源码仍只做本地全量扫描。';
+  @State processingMode: ProcessingMode = 'online';
 
   private abilityContext(): common.UIAbilityContext {
     return this.getUIContext().getHostContext() as common.UIAbilityContext;
   }
 
+  private mapVulnerabilities(report: CodeAnalyzeResponse): Finding[] {
+    return report.vulnerabilities.map((item: CodeVulnerability): Finding => {
+      const location = item.filePath ?
+        `${item.filePath}${item.line ? `:${item.line}` : ''}` :
+        (item.line ? `行 ${item.line}` : '代码片段');
+      return {
+        title: item.title,
+        evidence: `${location} · ${item.reason}`,
+        suggestion: item.suggestion,
+        riskLevel: item.riskLevel
+      };
+    });
+  }
+
   private async scan(): Promise<void> {
-    const report: ScanReport = LocalRuleEngine.scanCode(this.codeText);
-    this.findings = report.findings;
-    this.score = report.score;
-    let riskLevel: RiskLevel = 'low';
-    report.findings.forEach((item: Finding) => {
-      if (item.riskLevel === 'high') {
-        riskLevel = 'high';
-      } else if (item.riskLevel === 'medium' && riskLevel !== 'high') {
-        riskLevel = 'medium';
-      }
-    });
-    const summary = report.findings.length > 0 ?
-      `本地规则检测发现 ${report.findings.length} 项风险，请修复后再提交。` :
-      '本地规则检测未发现明显风险，仍建议在提交前进行人工复核。';
-    await HistoryStore.add(this.abilityContext(), {
-      module: 'code',
-      moduleLabel: '代码卫士',
-      riskLevel: riskLevel,
-      score: report.score,
-      summary: summary
-    });
+    if (this.codeText.trim().length === 0) {
+      this.snippetStatus = '请先输入待检测代码';
+      return;
+    }
+    this.scanningSnippet = true;
+    this.snippetStatus = this.processingMode === 'online' ?
+      '正在调用 DeepSeek 联网增强分析…' :
+      '正在执行本地规则检测…';
+    try {
+      const report: CodeAnalyzeResponse =
+        await GuardianApi.analyzeCodeText(this.codeText, 'auto', this.processingMode);
+      this.score = report.score;
+      this.findings = this.mapVulnerabilities(report);
+      const source = report.detectorSource ?? 'rule';
+      this.snippetStatus =
+        `${report.summary} · 来源 ${source}` +
+        (report.deepseekWarning ? `\n${report.deepseekWarning}` : '');
+      await HistoryStore.add(this.abilityContext(), {
+        module: 'code',
+        moduleLabel: '代码卫士',
+        riskLevel: report.riskLevel,
+        score: report.score,
+        summary: report.summary
+      });
+    } catch (error) {
+      this.snippetStatus = this.errorMessage(error, '代码检测失败');
+    } finally {
+      this.scanningSnippet = false;
+    }
   }
 
   private async pickArchive(): Promise<void> {
@@ -82,21 +105,19 @@ struct CodePage {
     this.archiveStatus = '正在上传到私有服务并执行只读扫描…';
     try {
       const report: CodeAnalyzeResponse =
-        await GuardianApi.analyzeCodeArchive(this.archiveUri, this.archiveName);
+        await GuardianApi.analyzeCodeArchive(
+          this.archiveUri,
+          this.archiveName,
+          this.processingMode
+        );
       this.score = report.score;
-      this.findings = report.vulnerabilities.map((item: CodeVulnerability): Finding => {
-        const location = item.filePath ?
-          `${item.filePath}${item.line ? `:${item.line}` : ''}` : '项目级风险';
-        return {
-          title: item.title,
-          evidence: `${location} · ${item.reason}`,
-          suggestion: item.suggestion,
-          riskLevel: item.riskLevel
-        };
-      });
+      this.findings = this.mapVulnerabilities(report);
+      const scanned = report.scannedFiles ?? 0;
+      const skipped = report.skippedFiles ?? 0;
       this.archiveStatus =
-        `已扫描 ${report.scannedFiles} 个文件，跳过 ${report.skippedFiles} 个；` +
-        `${report.shouldSubmit ? '可以进入人工复核' : '暂不建议直接提交'}`;
+        `已扫描 ${scanned} 个文件，跳过 ${skipped} 个；` +
+        `${report.shouldSubmit ? '可以进入人工复核' : '暂不建议直接提交'}` +
+        (report.deepseekWarning ? `\n${report.deepseekWarning}` : '');
       await HistoryStore.add(this.abilityContext(), {
         module: 'code',
         moduleLabel: '代码卫士',
@@ -131,35 +152,61 @@ struct CodePage {
       Scroll() {
         Column() {
           SectionCard({
-            title: '01 输入代码片段',
-            copy: '本地规则检查硬编码凭据、SQL 拼接、命令执行、敏感日志和明文地址。'
+            title: '处理模式',
+            copy: '代码片段联网时调用 DeepSeek；ZIP 即使选联网也只做本地全量扫描，不会整包外发。'
           }) {
-            TextArea({
-              text: this.codeText,
-              placeholder: '粘贴待提交代码'
+            ProcessingModeSelector({
+              mode: this.processingMode,
+              onlineHint: 'DeepSeek 增强',
+              onModeChange: (mode: ProcessingMode) => {
+                this.processingMode = mode;
+              }
             })
-              .height(210)
-              .fontSize(13)
-              .fontColor('#172033')
-              .backgroundColor('#F8FAFC')
-              .borderRadius(12)
-              .padding(12)
-              .onChange((value: string) => {
-                this.codeText = value;
-              })
-
-            Button('开始本地代码检测')
-              .width('100%')
-              .height(46)
-              .fontSize(14)
-              .fontColor('#FFFFFF')
-              .backgroundColor('#7C3AED')
-              .borderRadius(13)
-              .margin({ top: 12 })
-              .onClick(() => {
-                this.scan();
-              })
           }
+
+          Column() {
+            SectionCard({
+              title: '01 输入代码片段',
+              copy: '联网增强会在本地规则基础上调用 DeepSeek，失败时自动回退本地结果。'
+            }) {
+              TextArea({
+                text: this.codeText,
+                placeholder: '粘贴待提交代码'
+              })
+                .height(210)
+                .fontSize(13)
+                .fontColor('#172033')
+                .backgroundColor('#F8FAFC')
+                .borderRadius(12)
+                .padding(12)
+                .onChange((value: string) => {
+                  this.codeText = value;
+                })
+
+              Text(this.snippetStatus)
+                .fontSize(12)
+                .fontColor('#64748B')
+                .lineHeight(19)
+                .margin({ top: 10 })
+                .width('100%')
+
+              Button(this.scanningSnippet ? '检测中…' :
+                (this.processingMode === 'online' ? '开始 DeepSeek 增强检测' : '开始本地代码检测'))
+                .enabled(!this.scanningSnippet)
+                .width('100%')
+                .height(46)
+                .fontSize(14)
+                .fontColor('#FFFFFF')
+                .backgroundColor(this.scanningSnippet ? '#94A3B8' : '#7C3AED')
+                .borderRadius(13)
+                .margin({ top: 12 })
+                .onClick(() => {
+                  this.scan();
+                })
+            }
+          }
+          .width('100%')
+          .margin({ top: 12 })
 
           Column() {
             SectionCard({

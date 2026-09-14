@@ -11,7 +11,7 @@ import {
 
 // DevEco phone emulator reaches the development computer through 10.0.2.2.
 // Replace this with the computer's LAN HTTPS address when testing on a device.
-export const API_BASE_URL: string = 'http://10.0.2.2:8000';
+export const API_BASE_URL: string = 'http://10.0.2.2:8001';
 
 interface ApiErrorEnvelope {
   detail?: string;
@@ -44,7 +44,23 @@ export class GuardianApi {
     }
   }
 
-  static async analyzeCodeArchive(fileUri: string, fileName: string): Promise<CodeAnalyzeResponse> {
+  static analyzeCodeText(code: string, language: string,
+    processingMode: string = 'local'): Promise<CodeAnalyzeResponse> {
+    return GuardianApi.send<CodeAnalyzeResponse>('/api/code/analyze', {
+      method: http.RequestMethod.POST,
+      header: {
+        'Content-Type': 'application/json'
+      },
+      extraData: JSON.stringify({
+        language: language,
+        code: code,
+        processingMode: processingMode
+      })
+    });
+  }
+
+  static async analyzeCodeArchive(fileUri: string, fileName: string,
+    processingMode: string = 'local'): Promise<CodeAnalyzeResponse> {
     const fileData = await GuardianApi.readSelectedFile(fileUri, 10 * 1024 * 1024);
     return GuardianApi.send<CodeAnalyzeResponse>('/api/code/analyze', {
       method: http.RequestMethod.POST,
@@ -55,7 +71,7 @@ export class GuardianApi {
         {
           name: 'processing_mode',
           contentType: 'text/plain',
-          data: 'local'
+          data: processingMode
         },
         {
           name: 'file',
@@ -125,20 +141,21 @@ export class GuardianApi {
     });
   }
 
-  static async detectPrivacy(fileUri: string, fileName: string): Promise<DetectResponse> {
+  static async detectPrivacy(fileUri: string, fileName: string,
+    processingMode: string = 'local'): Promise<DetectResponse> {
     const fileData = await GuardianApi.readSelectedFile(fileUri, 10 * 1024 * 1024);
-    return GuardianApi.detectPrivacyData(fileData, fileName);
+    return GuardianApi.detectPrivacyData(fileData, fileName, processingMode);
   }
 
-  static async detectPrivacyDemo(): Promise<DetectResponse> {
+  static async detectPrivacyDemo(processingMode: string = 'local'): Promise<DetectResponse> {
     const fileName = 'privacy_sentinel_demo_qr.png';
     const fileData =
       await GuardianApi.downloadProcessedImage('/static/samples/privacy_sentinel_demo_qr.png');
-    return GuardianApi.detectPrivacyData(fileData, fileName);
+    return GuardianApi.detectPrivacyData(fileData, fileName, processingMode);
   }
 
-  private static detectPrivacyData(fileData: ArrayBuffer,
-    fileName: string): Promise<DetectResponse> {
+  private static detectPrivacyData(fileData: ArrayBuffer, fileName: string,
+    processingMode: string = 'local'): Promise<DetectResponse> {
     return GuardianApi.send<DetectResponse>('/api/detect', {
       method: http.RequestMethod.POST,
       header: {
@@ -148,7 +165,7 @@ export class GuardianApi {
         {
           name: 'processing_mode',
           contentType: 'text/plain',
-          data: 'local'
+          data: processingMode
         },
         {
           name: 'file',
@@ -227,7 +244,11 @@ export class GuardianApi {
     return 'text/plain';
   }
 
-  private static async readSelectedFile(uri: string, maxBytes: number): Promise<ArrayBuffer> {
+  /**
+   * Read a picker URI into memory so a caller can scan it locally.
+   * Public so the on-device scanner can reuse the same bounded reader.
+   */
+  static async readSelectedFile(uri: string, maxBytes: number): Promise<ArrayBuffer> {
     let selectedFd = -1;
     try {
       const selectedFile = await fileIo.open(uri, fileIo.OpenMode.READ_ONLY);
