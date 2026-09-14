@@ -20,4 +20,6 @@ local.properties
 *.hsp
 *.har
 _archive/
+tmp/
+test/
 platform/samples/generated/

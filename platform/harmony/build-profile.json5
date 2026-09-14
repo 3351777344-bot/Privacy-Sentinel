@@ -1,10 +1,24 @@
 {
   "app": {
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "GuardianHub",
+        "type": "HarmonyOS",
+        "material": {
+          "storeFile": "E:/GuardianHub-signing/guardianhub-release.p12",
+          "storePassword": "0000001A8F38E63669E0B0E71DE92E268D6B2C56A06AB39492C919975D5CEF612294CE4B6306011C832C",
+          "keyAlias": "guardianhub",
+          "keyPassword": "0000001AEADB7E3614FE50E74DE2873717DFE9F55D3AA3D7EDF9495E0CFA61B0855966FF253F6DA067C3",
+          "signAlg": "SHA256withECDSA",
+          "profile": "D:/GuardianHubRelease.p7b",
+          "certpath": "D:/GuardianHub.cer"
+        }
+      }
+    ],
     "products": [
       {
         "name": "default",
-        "signingConfig": "default",
+        "signingConfig": "GuardianHub",
         "targetSdkVersion": "6.0.2(22)",
         "compatibleSdkVersion": "6.0.2(22)",
         "runtimeOS": "HarmonyOS",

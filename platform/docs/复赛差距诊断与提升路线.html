@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GuardianHub 复赛差距诊断与提升路线</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: #f2f6fb; color: #1f2d3d; padding: 28px 16px; line-height: 1.6; }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  .hero { background: linear-gradient(135deg, #1e4fd8 0%, #2f6bff 60%, #4a8cff 100%); border-radius: 16px; padding: 26px 30px; color: #fff; margin-bottom: 22px; }
+  .hero h1 { font-size: 24px; font-weight: 700; letter-spacing: .5px; }
+  .hero .sub { font-size: 14px; opacity: .92; margin-top: 6px; }
+  .hero .meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+  .pill { background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.35); padding: 4px 12px; border-radius: 999px; font-size: 13px; }
+  .pill.warn { background: #ffe9a8; color: #7a4d00; border-color: #ffd35c; font-weight: 600; }
+  .card { background: #fff; border-radius: 14px; padding: 22px 24px; margin-bottom: 18px; box-shadow: 0 2px 10px rgba(31,45,61,.06); }
+  .card h2 { font-size: 17px; font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+  .card h2 .tag { font-size: 12px; font-weight: 500; background: #eef3ff; color: #2f6bff; padding: 2px 8px; border-radius: 6px; }
+  .card .hint { font-size: 13px; color: #7a8aa0; margin-bottom: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  /* 评审维度条形 */
+  .bar-row { display: grid; grid-template-columns: 118px 1fr 96px; align-items: center; gap: 10px; margin-bottom: 13px; font-size: 14px; }
+  .bar-row .name { font-weight: 600; }
+  .bar-row .name small { display: block; font-weight: 400; color: #7a8aa0; font-size: 12px; }
+  .bar-track { background: #e9eef6; border-radius: 8px; height: 18px; position: relative; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 8px; }
+  .bar-fill.good { background: linear-gradient(90deg,#35c07a,#5bd39a); }
+  .bar-fill.mid { background: linear-gradient(90deg,#f0a63a,#ffc45e); }
+  .bar-fill.low { background: linear-gradient(90deg,#e05a4a,#ff8577); }
+  .bar-row .val { font-size: 13px; color: #5a6b80; text-align: right; }
+  .bar-row .val b { font-size: 15px; color: #1f2d3d; }
+  .legend { font-size: 12px; color: #7a8aa0; margin-top: 2px; }
+  /* 提交物状态 */
+  .item { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: start; padding: 10px 12px; border-radius: 10px; margin-bottom: 8px; background: #f8fafd; border: 1px solid #e6ecf4; }
+  .badge { font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; white-space: nowrap; }
+  .badge.ok { background: #e2f7ec; color: #1d8a4f; }
+  .badge.warn { background: #fff4d9; color: #a06a00; }
+  .badge.miss { background: #fde7e5; color: #c0392b; }
+  .item .name { font-weight: 600; font-size: 14px; }
+  .item .desc { font-size: 13px; color: #5a6b80; }
+  .st-num { font-size: 16px; font-weight: 700; text-align: center; }
+  /* 路线图 */
+  .road { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .road-col { border-radius: 12px; padding: 16px 18px; border: 1px solid; }
+  .road-col.p0 { background: #fff5f5; border-color: #f3b7b1; }
+  .road-col.p1 { background: #fffaf0; border-color: #f0d089; }
+  .road-col.p2 { background: #f1f7ff; border-color: #b9d2f5; }
+  .road-col h3 { font-size: 15px; margin-bottom: 2px; }
+  .road-col .when { font-size: 12px; font-weight: 600; margin-bottom: 10px; }
+  .road-col.p0 .when { color: #c0392b; }
+  .road-col.p1 .when { color: #a06a00; }
+  .road-col.p2 .when { color: #2f6bff; }
+  .road-col ol { padding-left: 18px; font-size: 13.5px; }
+  .road-col li { margin-bottom: 8px; }
+  .road-col li b { color: inherit; }
+  .road-col .why { font-size: 12px; color: #7a8aa0; margin-top: 8px; border-top: 1px dashed #dbe3ee; padding-top: 8px; }
+  .note { font-size: 12px; color: #7a8aa0; margin-top: 6px; }
+  .src { font-size: 12px; color: #7a8aa0; line-height: 1.8; }
+  .src a { color: #2f6bff; text-decoration: none; }
+  .total-line { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; margin-top: 14px; padding: 12px 14px; background: #f8fafd; border-radius: 10px; border: 1px solid #e6ecf4; font-size: 14px; }
+  .total-line .big { font-size: 22px; font-weight: 800; color: #1e4fd8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <h1>GuardianHub · 复赛差距诊断与提升路线</h1>
+    <div class="sub">对照 2026「中国高校计算机大赛—人工智能创意赛」鸿蒙赛道复赛要求 · 应用创新方向</div>
+    <div class="meta">
+      <span class="pill">诊断日期 2026-09-14</span>
+      <span class="pill warn">距复赛提交截止 2026-09-30 24:00 仅剩约 16 天</span>
+      <span class="pill">复赛线上评审 · 11 月线下总决赛</span>
+      <span class="pill">提交截止前可多次更新（至多 10 次）</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>① 评审维度 · 当前把握度 <span class="tag">诊断估计，非官方评分</span></h2>
+    <div class="hint">基础评分 100 分 = 创新性 50 + 完备度 20 + 前景评估 20 + 规范性 10；另设可演示成果与作品落地附加分最高 20 分。条形为基于代码与文档审查的把握度估计。</div>
+    <div class="bar-row">
+      <div class="name">创新性<small>满分 50 · 占比最高</small></div>
+      <div class="bar-track"><div class="bar-fill mid" style="width:60%"></div></div>
+      <div class="val"><b>30</b> / 50</div>
+    </div>
+    <div class="bar-row">
+      <div class="name">完备度<small>满分 20</small></div>
+      <div class="bar-track"><div class="bar-fill good" style="width:75%"></div></div>
+      <div class="val"><b>15</b> / 20</div>
+    </div>
+    <div class="bar-row">
+      <div class="name">前景评估<small>满分 20</small></div>
+      <div class="bar-track"><div class="bar-fill low" style="width:40%"></div></div>
+      <div class="val"><b>8</b> / 20</div>
+    </div>
+    <div class="bar-row">
+      <div class="name">规范性<small>满分 10</small></div>
+      <div class="bar-track"><div class="bar-fill good" style="width:80%"></div></div>
+      <div class="val"><b>8</b> / 10</div>
+    </div>
+    <div class="bar-row">
+      <div class="name">可演示 + 落地<small>附加分满分 20</small></div>
+      <div class="bar-track"><div class="bar-fill mid" style="width:50%"></div></div>
+      <div class="val"><b>10</b> / 20</div>
+    </div>
+    <div class="total-line">
+      <span>估计当前综合把握 <span class="big">约 71 / 120</span></span>
+      <span>短期可争取空间：<b>+25 ~ +35</b>（强化鸿蒙差异化 + 补齐落地证据 + 补全提交物）</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>② 复赛硬性提交物 · 缺口清单</h2>
+    <div class="hint">应用创新方向：说明文档 + 演示 Demo + 5 分钟以内视频 + HAP；晋级复赛队伍另需盖章/签名团队信息表与原创性声明（模板在官方《作品说明文档》）。</div>
+    <div class="item">
+      <div class="st-num">1</div>
+      <div><div class="name">作品说明文档（官方模板）</div><div class="desc">已有初赛版 docx，需按复赛模板升级：创意描述、设计稿/技术方案、介绍文档</div></div>
+      <span class="badge warn">部分具备</span>
+    </div>
+    <div class="item">
+      <div class="st-num">2</div>
+      <div><div class="name">演示 Demo</div><div class="desc">HarmonyOS 客户端可编译（unsigned HAP 331KB）+ PC Web 完整演示 + 后端，双端可用</div></div>
+      <span class="badge ok">已具备</span>
+    </div>
+    <div class="item">
+      <div class="st-num">3</div>
+      <div><div class="name">5 分钟以内演示视频</div><div class="desc">仓库中无视频脚本、无成片 —— 复赛硬性要求，目前完全缺失</div></div>
+      <span class="badge miss">缺失</span>
+    </div>
+    <div class="item">
+      <div class="st-num">4</div>
+      <div><div class="name">HAP 文件（应用方向）</div><div class="desc">当前仅调试用 unsigned HAP，需正式签名后可安装的 HAP</div></div>
+      <span class="badge warn">部分具备</span>
+    </div>
+    <div class="item">
+      <div class="st-num">5</div>
+      <div><div class="name">参赛团队信息表（盖章/签名）</div><div class="desc">需学校教务盖章 或 指导教师/教务老师/辅导员签名，属手续性工作，时间敏感</div></div>
+      <span class="badge miss">缺失</span>
+    </div>
+    <div class="item">
+      <div class="st-num">6</div>
+      <div><div class="name">作品原创性声明（盖章/签名）</div><div class="desc">同上，官方模板中获取，随说明文档一并提交</div></div>
+      <span class="badge miss">缺失</span>
+    </div>
+    <div class="note">提示：提交物压缩包命名与大小规范、HAP 与视频作为独立产物上传，见官网「提交作品」入口具体要求；源码包排除 .git / node_modules / oh_modules / build 等。</div>
+  </div>
+
+  <div class="card">
+    <h2>③ 16 天提升路线 · 按杠杆排序</h2>
+    <div class="hint">创新性权重最高（50/100），是最大杠杆；硬性提交物是门槛，缺失即失去评审资格。</div>
+    <div class="road">
+      <div class="road-col p0">
+        <h3>P0 · 硬性门槛</h3>
+        <div class="when">9/14 – 9/20 ｜ 不做则无评审资格</div>
+        <ol>
+          <li><b>办手续</b>：下载官方《作品说明文档》，填写团队信息表 + 原创性声明，找教务盖章或导师签名</li>
+          <li><b>写视频脚本</b>：按 5 分钟分镜（含演示链路：分享→检测→脱敏→分享），随后录制 + 剪辑</li>
+          <li><b>升级说明文档</b>：按官方模板补创意描述、设计稿/技术方案、项目介绍</li>
+          <li><b>出签名 HAP</b> + 按规范打包源码、独立产物</li>
+        </ol>
+        <div class="why">影响：直接决定能否参评；盖章签名需预留行政时间，务必最先启动。</div>
+      </div>
+      <div class="road-col p1">
+        <h3>P1 · 创新性提升</h3>
+        <div class="when">9/14 – 9/25 ｜ 影响 50 分权重</div>
+        <ol>
+          <li><b>做进主流程 1 个鸿蒙特性</b>并拍进视频，候选（按性价比排序）：<br>① 分享前安全闸门：把检查步骤嵌入分享路径（Share Kit 前先过检测），直接坐实「操作前」概念<br>② 服务卡片/原子服务：桌面卡片一键检测入口<br>③ 端侧 OCR（ML Kit）：离线完成隐私检测，把「本地优先」做彻底</li>
+          <li><b>视频叙事</b>：突出「操作前拦截」链路，一镜到底展示完整技术链路</li>
+          <li><b>AI 融合叙事</b>：DeepSeek / Qwen VL 增强已具备，脚本中保留 1 个联网增强演示点（含失败回退）</li>
+        </ol>
+        <div class="why">影响：差异化与「鸿蒙首发创新特性」证据，评审最看重；特性必须服务主流程而非堆砌。</div>
+      </div>
+      <div class="road-col p2">
+        <h3>P2 · 前景 + 落地证据</h3>
+        <div class="when">9/20 – 9/28 ｜ 影响 20 + 20 分</div>
+        <ol>
+          <li><b>补前景章节</b>：目标用户与痛点数据、竞品对比（隐私擦除类工具）、市场规模、商业模式（开源 + 校园版/高校安全服务）、落地路径（校园试点）</li>
+          <li><b>落地证据</b>：拉同学真实试用，收集截图、反馈与数据作为「作品落地情况」佐证</li>
+          <li><b>首发论证</b>：检索鸿蒙应用市场是否有同类「操作前安全中心」，形成首发/差异化声明素材</li>
+        </ol>
+        <div class="why">影响：前景评估 20 分 + 附加分 20 分；特等奖要求「鸿蒙首发应用或首发创新特性」，需尽早查证。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>项目现状强项（保持并写进材料）</h2>
+    <div class="grid" style="font-size:13.5px; color:#3a4a5e;">
+      <div>· 四模块统一报告结构（风险等级 / 0-100 评分 / 证据 / 建议）</div>
+      <div>· HarmonyOS 客户端可编译 + 端侧本地规则引擎离线兜底</div>
+      <div>· 鸿蒙能力：系统 Picker、File Kit、ArkData、Share Kit、相册保存</div>
+      <div>· 本地 OCR（RapidOCR）+ OpenCV + Pillow 真实打码，非预览</div>
+      <div>· DeepSeek / Qwen VL 可选增强，默认关闭、失败自动回退</div>
+      <div>· 后端 9 个测试文件 + GitHub Actions CI（pytest + 前端 build）</div>
+      <div>· 演示样本齐全（含风险代码 ZIP、风险文档）</div>
+      <div>· 安全设计：ZIP 只读扫描、Link Guard 不访问目标、24h 清理</div>
+    </div>
+  </div>
+
+  <div class="card src">
+    <b>信息与来源</b>（2026-09-14 检索）：<br>
+    · 复赛提交物与评审维度：华为开发者联盟「鸿蒙高校创新赛」官网（developer.huawei.com/consumer/cn/activity/incentive/C4）；品玩/CSDN《7月26日截止报名：鸿蒙国赛四大赛道技术选型与破题指南》（复赛需提交说明文档、演示 Demo、五分钟以内视频；应用方向提供 HAP；创新性 50 / 完备度 20 / 前景 20 / 规范性 10 + 附加 20）。<br>
+    · 复赛截止：2026-09-30 24:00（哈工大威海计算机学院通知、山东理工大学通知、搜狐、CSDN 多方一致）；提交截止前可多次更新作品（官网 FAQ）。<br>
+    · 特等奖须为「鸿蒙首发应用或首发创新特性」（中国日报网报道）。<br>
+    · 项目现状：基于 E:\GuardianHub 仓库代码、文档与构建产物审查（README、项目介绍文档、接口文档、展示稿、git 历史、entry 源码 import 清单、HAP 构建产物、CI 配置、测试文件）。<br>
+    <div class="note">把握度条形为诊断估计，仅用于优先级排序，不代表官方评分。</div>
+  </div>
+
+</div>
+</body>
+</html>
