@@ -37,7 +37,12 @@ PRIVACY_PATTERNS = [
 
 @lru_cache(maxsize=1)
 def _ocr_engine() -> Any:
-    from rapidocr_onnxruntime import RapidOCR
+    """Build the process-wide RapidOCR engine.
+
+    Pinned to the `rapidocr` 3.x distribution (see requirements.txt). The legacy
+    `rapidocr_onnxruntime` module name only exists for 2.x and must not be used.
+    """
+    from rapidocr import RapidOCR
 
     return RapidOCR()
 
@@ -213,7 +218,12 @@ def _detect_qr_codes(image_path: str, image_width: int, image_height: int, image
 
 
 def _run_ocr(image_path: str, image_width: int, image_height: int) -> tuple[list[str], list[Any], list[float]]:
-    """Run RapidOCR, downscaling very large images first to cut latency."""
+    """Run RapidOCR, downscaling very large images first to cut latency.
+
+    Returns `(texts, boxes, scores)` parallel lists. Boxes stay in the original
+    image coordinate space: when the input was downscaled for speed, the points
+    reported for the reduced image are divided back by `scale`.
+    """
     import numpy as np
 
     scale = 1.0
@@ -232,31 +242,35 @@ def _run_ocr(image_path: str, image_width: int, image_height: int) -> tuple[list
         result = _ocr_engine()(ocr_input)
     if result is None:
         return [], [], []
-    # rapidocr_onnxruntime returns (detections, timing). Each detection is [box, text, score].
-    detections = result[0] if isinstance(result, tuple) else result
-    if not detections:
+
+    # rapidocr 3.x returns a RapidOCROutput exposing parallel `txts` / `boxes` /
+    # `scores` attributes (all None when nothing was detected). It is not a tuple
+    # and is not subscriptable, so read the attributes directly.
+    texts_raw = getattr(result, "txts", None)
+    boxes_raw = getattr(result, "boxes", None)
+    scores_raw = getattr(result, "scores", None)
+    if texts_raw is None or scores_raw is None:
         return [], [], []
 
     texts: list[str] = []
     boxes: list[Any] = []
     scores: list[float] = []
-    for detection in detections:
-        if not isinstance(detection, (list, tuple)) or len(detection) < 3:
-            continue
-        raw_text = detection[1]
+    for index, raw_text in enumerate(texts_raw):
         if not isinstance(raw_text, str) or not raw_text.strip():
             continue
-        raw_score = detection[2]
         try:
-            score = float(raw_score)
-        except (TypeError, ValueError):
+            score = float(scores_raw[index])
+        except (IndexError, TypeError, ValueError):
             continue
+        points = boxes_raw[index] if boxes_raw is not None else None
+        if points is None:
+            continue
+        if scale == 1.0:
+            boxes.append(points)
+        else:
+            boxes.append(np.asarray(points) / scale)
         texts.append(raw_text)
         scores.append(score)
-        if scale == 1.0:
-            boxes.append(detection[0])
-        else:
-            boxes.append([[float(x) / scale, float(y) / scale] for x, y in detection[0]])
     return texts, boxes, scores
 
 
