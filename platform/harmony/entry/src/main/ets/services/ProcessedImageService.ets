@@ -1,7 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { fileIo, fileUri } from '@kit.CoreFileKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
-import { systemShare } from '@kit.ShareKit';
+import { ShareOutService } from './ShareOutService';
 
 export class ProcessedImageService {
   static async cache(context: common.UIAbilityContext, imageData: ArrayBuffer): Promise<string> {
@@ -72,18 +72,7 @@ export class ProcessedImageService {
   }
 
   static async share(context: common.UIAbilityContext, cachedUri: string): Promise<void> {
-    try {
-      const sharedData = new systemShare.SharedData({
-        utd: 'general.png',
-        uri: cachedUri,
-        title: 'GuardianHub 安全图片',
-        description: '已完成隐私脱敏，请在分享前再次复核。'
-      });
-      const controller = new systemShare.ShareController(sharedData);
-      await controller.show(context, {});
-    } catch (error) {
-      const typedError = error as Error;
-      throw new Error(typedError.message || '系统分享面板打开失败。');
-    }
+    // Delegated so every gate channel opens the share panel the same way.
+    await ShareOutService.shareFile(context, cachedUri, 'guardianhub-safe-image.png');
   }
 }

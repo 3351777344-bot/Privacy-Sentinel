@@ -11,6 +11,14 @@
     {
       "name": "EntryAbility_label",
       "value": "GuardianHub"
+    },
+    {
+      "name": "ShareCheckAbility_desc",
+      "value": "分享前隐私与安全安检入口"
+    },
+    {
+      "name": "ShareCheckAbility_label",
+      "value": "GuardianHub 隐私安检"
     }
   ]
 }

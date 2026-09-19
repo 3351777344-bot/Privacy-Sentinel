@@ -36,6 +36,79 @@
             ]
           }
         ]
+      },
+      {
+        "name": "ShareCheckAbility",
+        "srcEntry": "./ets/shareability/ShareCheckAbility.ets",
+        "description": "$string:ShareCheckAbility_desc",
+        "icon": "$media:app_icon",
+        "label": "$string:ShareCheckAbility_label",
+        "startWindowIcon": "$media:app_icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "skills": [
+          {
+            "actions": [
+              "ohos.want.action.sendData"
+            ],
+            "uris": [
+              {
+                "scheme": "file",
+                "utd": "general.image",
+                "type": "general.image",
+                "maxFileSupported": 100
+              },
+              {
+                "scheme": "file",
+                "utd": "general.jpeg",
+                "type": "general.jpeg",
+                "maxFileSupported": 100
+              },
+              {
+                "scheme": "file",
+                "utd": "general.png",
+                "type": "general.png",
+                "maxFileSupported": 100
+              },
+              {
+                "scheme": "file",
+                "utd": "com.adobe.pdf",
+                "type": "com.adobe.pdf",
+                "maxFileSupported": 100
+              },
+              {
+                "scheme": "file",
+                "utd": "com.microsoft.word.doc",
+                "type": "com.microsoft.word.doc",
+                "maxFileSupported": 100
+              },
+              {
+                "scheme": "file",
+                "utd": "org.openxmlformats.wordprocessingml.document",
+                "type": "org.openxmlformats.wordprocessingml.document",
+                "maxFileSupported": 100
+              },
+              {
+                "scheme": "file",
+                "utd": "general.text",
+                "type": "general.text",
+                "maxFileSupported": 100
+              },
+              {
+                "scheme": "file",
+                "utd": "general.plain-text",
+                "type": "general.plain-text",
+                "maxFileSupported": 100
+              },
+              {
+                "scheme": "file",
+                "utd": "general.hyperlink",
+                "type": "general.hyperlink",
+                "maxFileSupported": 100
+              }
+            ]
+          }
+        ]
       }
     ]
   }

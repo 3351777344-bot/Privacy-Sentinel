@@ -4,7 +4,8 @@
     "pages/PrivacyPage",
     "pages/CodePage",
     "pages/LinkPage",
-    "pages/DocPage"
+    "pages/DocPage",
+    "pages/ShareCheckPage"
   ]
 }
 
