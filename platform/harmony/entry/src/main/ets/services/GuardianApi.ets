@@ -9,8 +9,16 @@ import {
   QrDecodeResponse
 } from '../models/SecurityModels';
 
-// DevEco phone emulator reaches the development computer through 10.0.2.2.
-// Replace this with the computer's LAN HTTPS address when testing on a device.
+// Backend address for the HarmonyOS client.
+//
+// 10.0.2.2 is the DevEco emulator's alias for the development computer, so this
+// value ONLY works on an emulator with the backend running locally. A real
+// device (and therefore any judge installation) resolves 10.0.2.2 to nothing.
+//
+// Before producing a submission HAP, replace this with the public HTTPS address
+// of the deployed backend and rebuild — the value is compiled into the HAP, so
+// shipping the emulator address silently leaves the image/link channels unable
+// to reach any service.
 export const API_BASE_URL: string = 'http://10.0.2.2:8001';
 
 interface ApiErrorEnvelope {
