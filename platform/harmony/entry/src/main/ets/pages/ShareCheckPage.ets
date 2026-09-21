@@ -3,10 +3,16 @@ import { emitter } from '@kit.BasicServicesKit';
 import { AppHeader } from '../components/AppHeader';
 import { ResultPanel } from '../components/ResultPanel';
 import { SectionCard } from '../components/SectionCard';
-import { DetectResponse, Finding, PrivacyItem, RiskLevel, ScanReport } from '../models/SecurityModels';
+import {
+  CodeAnalyzeResponse,
+  CodeVulnerability,
+  DetectResponse,
+  Finding,
+  PrivacyItem,
+  RiskLevel
+} from '../models/SecurityModels';
 import { GuardianApi } from '../services/GuardianApi';
 import { HistoryStore } from '../services/HistoryStore';
-import { LocalRuleEngine } from '../services/LocalRuleEngine';
 import { ProcessedImageService } from '../services/ProcessedImageService';
 import { ShareOutService } from '../services/ShareOutService';
 import { SignatureDB } from '../services/SignatureDB';
@@ -47,6 +53,7 @@ struct ShareCheckPage {
   @State processed: boolean = false;
   @State maskMode: string = 'black';
   @State multiImageHint: string = '';
+  @State historyRecordId: string = '';
 
   private abilityContext(): common.UIAbilityContext {
     return this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -90,7 +97,7 @@ struct ShareCheckPage {
         break;
       default:
         this.phase = 'report';
-        this.summary = '暂不支持该类型的内容。当前支持图片、PDF/Word 文档、链接和代码片段。';
+        this.summary = '暂不支持该分享内容。请选择文件、图片、链接或代码片段。';
     }
   }
 
@@ -101,10 +108,13 @@ struct ShareCheckPage {
     this.riskLevel = 'low';
     this.summary = '正在进行安全检测…';
     this.suggestions = [];
+    this.sourceLabel = '';
+    this.sourceUri = '';
     this.imageId = '';
     this.processedImageUri = '';
     this.processed = false;
     this.multiImageHint = '';
+    this.historyRecordId = '';
     this.sourceText = '';
   }
 
@@ -113,16 +123,19 @@ struct ShareCheckPage {
       if (intent.utd.includes('image')) {
         return 'image';
       }
-      if (intent.utd.includes('pdf') || intent.utd.includes('word')) {
+      if (intent.utd.includes('pdf') || intent.utd.includes('word') ||
+        intent.utd.includes('archive')) {
         return 'doc';
       }
-      if (this.hasFileExtension(intent.uris[0], 'pdf|docx?|txt|md')) {
+      if (this.hasFileExtension(intent.uris[0], 'pdf|docx?|txt|md|zip')) {
         return 'doc';
       }
       if (this.hasFileExtension(intent.uris[0], 'png|jpe?g|webp|bmp|gif')) {
         return 'image';
       }
-      return 'unknown';
+      // Any shared file without a dedicated module still receives the generic
+      // binary/signature scan instead of being rejected by its extension.
+      return 'doc';
     }
     const text = intent.text.trim();
     if (text.length === 0) {
@@ -181,10 +194,10 @@ struct ShareCheckPage {
   private async runImageRoute(imageUri: string): Promise<void> {
     this.sourceUri = imageUri;
     this.sourceLabel = this.fileNameFromUri(imageUri);
-    this.summary = '正在进行 OCR、二维码和隐私规则检测…';
+    this.summary = '正在进行 OCR、隐私规则和 Qwen 联网增强检测…';
     try {
       const report: DetectResponse =
-        await GuardianApi.detectPrivacy(imageUri, this.sourceLabel, 'local');
+        await GuardianApi.detectPrivacy(imageUri, this.sourceLabel, 'online');
       this.imageId = report.imageId;
       this.findings = report.items.map((item: PrivacyItem): Finding => {
         return {
@@ -196,9 +209,13 @@ struct ShareCheckPage {
       });
       this.score = report.score;
       this.riskLevel = report.riskLevel;
-      this.summary = report.summary;
+      const modeHint = report.detectorMode ? ` · 引擎 ${report.detectorMode}` : '';
+      this.summary = `${report.summary}${modeHint}`;
+      if (report.detectorMessage && report.detectorMessage.length > 0) {
+        this.summary = `${this.summary}\n${report.detectorMessage}`;
+      }
       this.phase = 'report';
-      await this.recordHistory('privacy', '隐私哨兵', report.riskLevel, report.score, report.summary);
+      await this.recordHistory('privacy', '隐私哨兵', report.riskLevel, report.score, this.summary);
     } catch (error) {
       this.phase = 'offline';
       this.summary = this.errorMessage(error, '图片检测失败');
@@ -220,6 +237,10 @@ struct ShareCheckPage {
       this.processed = true;
       this.phase = 'report';
       this.summary = result.message;
+      if (this.historyRecordId.length > 0) {
+        await HistoryStore.updateProcessed(
+          this.abilityContext(), this.historyRecordId, `已使用${this.maskMode}方式脱敏`);
+      }
     } catch (error) {
       this.phase = 'report';
       this.summary = this.errorMessage(error, '脱敏图片生成失败');
@@ -232,6 +253,7 @@ struct ShareCheckPage {
     }
     try {
       await ProcessedImageService.share(this.abilityContext(), this.processedImageUri);
+      await this.recordShareAction('已打开脱敏图片分享面板');
     } catch (error) {
       this.summary = this.errorMessage(error, '打开系统分享失败');
     }
@@ -243,6 +265,7 @@ struct ShareCheckPage {
     }
     try {
       await ProcessedImageService.share(this.abilityContext(), this.sourceUri);
+      await this.recordShareAction('已知晓风险并打开原图分享面板');
     } catch (error) {
       this.summary = this.errorMessage(error, '打开系统分享失败');
     }
@@ -261,6 +284,7 @@ struct ShareCheckPage {
     try {
       await ShareOutService.shareFile(
         this.abilityContext(), this.sourceUri, this.sourceLabel);
+      await this.recordShareAction('已打开文件分享面板');
     } catch (error) {
       this.summary = this.errorMessage(error, '继续分享失败');
     }
@@ -273,6 +297,7 @@ struct ShareCheckPage {
     }
     try {
       await ShareOutService.shareLink(this.abilityContext(), this.sourceLabel);
+      await this.recordShareAction('已打开链接分享面板');
     } catch (error) {
       this.summary = this.errorMessage(error, '继续分享失败');
     }
@@ -285,6 +310,7 @@ struct ShareCheckPage {
     }
     try {
       await ShareOutService.shareCode(this.abilityContext(), code);
+      await this.recordShareAction('已打开代码分享面板');
     } catch (error) {
       this.summary = this.errorMessage(error, '继续分享失败');
     }
@@ -315,7 +341,7 @@ struct ShareCheckPage {
   private async runDocRoute(fileUri: string): Promise<void> {
     this.sourceUri = fileUri;
     this.sourceLabel = this.fileNameFromUri(fileUri);
-    this.summary = '正在执行端侧静态扫描（PE/PDF/ZIP/宏/哈希黑名单）…';
+    this.summary = '正在执行端侧通用文件扫描（文件头/PE/PDF/压缩包/宏/哈希黑名单）…';
     try {
       await SignatureDB.ensureLoaded(this.abilityContext());
       const buffer: ArrayBuffer =
@@ -382,17 +408,33 @@ struct ShareCheckPage {
   private async runCodeRoute(code: string): Promise<void> {
     this.sourceLabel = '分享的代码片段';
     this.sourceText = code;
-    this.summary = '正在执行端侧代码规则扫描…';
-    const report: ScanReport = LocalRuleEngine.scanCode(code);
-    this.findings = report.findings;
-    this.score = report.score;
-    this.riskLevel = this.overallRisk(report.findings);
-    this.summary = report.findings.length > 0 ?
-      `端侧规则引擎发现 ${report.findings.length} 项风险。` :
-      '端侧规则引擎未发现明显风险，仍建议人工复核。';
-    this.suggestions = ['修复后再提交或分享该代码。'];
-    this.phase = 'report';
-    await this.recordHistory('code', '代码卫士', this.riskLevel, report.score, this.summary);
+    this.summary = '正在调用 DeepSeek 联网增强分析…';
+    try {
+      const report: CodeAnalyzeResponse =
+        await GuardianApi.analyzeCodeText(code, 'auto', 'online');
+      this.findings = report.vulnerabilities.map((item: CodeVulnerability): Finding => {
+        const location = item.filePath ?
+          `${item.filePath}${item.line ? `:${item.line}` : ''}` :
+          (item.line ? `行 ${item.line}` : '代码片段');
+        return {
+          title: item.title,
+          evidence: `${location} · ${item.reason}`,
+          suggestion: item.suggestion,
+          riskLevel: item.riskLevel
+        };
+      });
+      this.score = report.score;
+      this.riskLevel = report.riskLevel;
+      const source = report.detectorSource ?? 'rule';
+      this.summary = `${report.summary} · 来源 ${source}` +
+        (report.deepseekWarning ? `\n${report.deepseekWarning}` : '');
+      this.suggestions = report.suggestions;
+      this.phase = 'report';
+      await this.recordHistory('code', '代码卫士', report.riskLevel, report.score, this.summary);
+    } catch (error) {
+      this.phase = 'offline';
+      this.summary = this.errorMessage(error, '代码检测失败');
+    }
   }
 
   private toRiskLevel(verdict: string): RiskLevel {
@@ -405,30 +447,30 @@ struct ShareCheckPage {
     return 'low';
   }
 
-  private overallRisk(findings: Finding[]): RiskLevel {
-    let risk: RiskLevel = 'low';
-    findings.forEach((item: Finding) => {
-      if (item.riskLevel === 'high') {
-        risk = 'high';
-      } else if (item.riskLevel === 'medium' && risk !== 'high') {
-        risk = 'medium';
-      }
-    });
-    return risk;
-  }
-
   private async recordHistory(module: string, label: string,
     riskLevel: RiskLevel, score: number, summary: string): Promise<void> {
     try {
-      await HistoryStore.add(this.abilityContext(), {
+      this.historyRecordId = await HistoryStore.add(this.abilityContext(), {
         module: module as 'privacy' | 'code' | 'link' | 'doc',
         moduleLabel: label,
         riskLevel: riskLevel,
         score: score,
-        summary: `[分享拦截] ${summary}`
+        summary: `[分享拦截] ${summary}`,
+        sourceLabel: this.sourceLabel,
+        status: '待决策',
+        findings: this.findings,
+        suggestions: this.suggestions
       });
     } catch (_) {
     }
+  }
+
+  private async recordShareAction(action: string): Promise<void> {
+    if (this.historyRecordId.length === 0) {
+      return;
+    }
+    await HistoryStore.updateAction(
+      this.abilityContext(), this.historyRecordId, action, '已发起分享');
   }
 
   private fileNameFromUri(uri: string): string {
@@ -446,7 +488,7 @@ struct ShareCheckPage {
       return '图片隐私安检';
     }
     if (this.route === 'doc') {
-      return '文档安全安检';
+      return '文件安全安检';
     }
     if (this.route === 'link') {
       return '链接安全安检';
@@ -745,7 +787,7 @@ struct ShareCheckPage {
           if (this.phase === 'offline') {
             SectionCard({
               title: '检测服务不可达',
-              copy: '该内容类型依赖联网检测服务。请确认后端服务已启动，或稍后重试；文档与代码片段支持端侧离线检测。'
+              copy: '该内容类型依赖联网检测服务。请确认后端服务已启动，或稍后重试；文档与 ZIP 文件支持端侧离线检测。'
             }) {
               Button('重试检测')
                 .width('100%')

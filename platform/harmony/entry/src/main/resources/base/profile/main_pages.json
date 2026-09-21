@@ -5,7 +5,8 @@
     "pages/CodePage",
     "pages/LinkPage",
     "pages/DocPage",
-    "pages/ShareCheckPage"
+    "pages/ShareCheckPage",
+    "pages/HistoryPage"
   ]
 }
 

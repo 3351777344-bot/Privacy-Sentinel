@@ -123,6 +123,21 @@ async def _read_upload_limited(file: UploadFile, max_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
+def _safe_unlink(path: Path) -> None:
+    """Best-effort delete of an expired artifact.
+
+    Retention cleanup is a housekeeping side task: it must never break a request.
+    On some hosts the file may be locked by another process (antivirus, an open
+    handle, a sandboxed filesystem shim) and ``unlink`` raises ``PermissionError``
+    instead of ``FileNotFoundError``. ``missing_ok=True`` only covers the latter,
+    so we swallow any OS-level failure here and retry on the next request.
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _cleanup_expired_files() -> None:
     if settings.retention_hours <= 0:
         return
@@ -130,10 +145,10 @@ def _cleanup_expired_files() -> None:
     for directory in (UPLOAD_DIR, PROCESSED_DIR):
         for path in directory.iterdir():
             if path.is_file() and path.name != ".gitkeep" and path.stat().st_mtime < cutoff:
-                path.unlink(missing_ok=True)
+                _safe_unlink(path)
     for path in DETECTION_DIR.iterdir():
         if path.is_file() and path.stat().st_mtime < cutoff:
-            path.unlink(missing_ok=True)
+            _safe_unlink(path)
     history_store.delete_expired(settings.retention_hours)
 
 
@@ -301,7 +316,7 @@ async def detect(
         )
     except Exception:
         logger.exception("Privacy detector failed for image %s", image_id)
-        saved_path.unlink(missing_ok=True)
+        _safe_unlink(saved_path)
         raise HTTPException(status_code=503, detail="图片检测引擎暂不可用，请稍后重试。")
     _save_detection_result(result)
     _append_history(

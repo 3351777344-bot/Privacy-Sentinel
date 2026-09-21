@@ -32,7 +32,9 @@ struct Index {
       return 100;
     }
     const total = this.historyRecords.reduce(
-      (sum: number, record: LocalHistoryRecord): number => sum + record.score,
+      (sum: number, record: LocalHistoryRecord): number => {
+        return sum + (record.processedScore === undefined ? record.score : record.processedScore);
+      },
       0
     );
     return Math.round(total / this.historyRecords.length);
@@ -40,7 +42,7 @@ struct Index {
 
   private reviewCount(): number {
     return this.historyRecords.filter(
-      (record: LocalHistoryRecord): boolean => record.riskLevel !== 'low'
+      (record: LocalHistoryRecord): boolean => !record.processed && record.riskLevel !== 'low'
     ).length;
   }
 
@@ -135,7 +137,7 @@ struct Index {
 
           Column() {
             Row() {
-              Text('今日安全概览')
+              Text('本机历史概览')
                 .fontSize(17)
                 .fontWeight(FontWeight.Bold)
                 .fontColor('#172033')
@@ -183,6 +185,18 @@ struct Index {
             }
             .width('100%')
             .margin({ top: 18 })
+
+            Button('管理全部历史报告  ›')
+              .fontSize(13)
+              .fontColor('#2563EB')
+              .backgroundColor('#EFF6FF')
+              .borderRadius(11)
+              .height(40)
+              .width('100%')
+              .margin({ top: 16 })
+              .onClick(() => {
+                this.getUIContext().getRouter().pushUrl({ url: 'pages/HistoryPage' });
+              })
           }
           .alignItems(HorizontalAlign.Start)
           .padding(17)
@@ -236,6 +250,9 @@ struct Index {
                 .borderRadius(12)
                 .margin({ bottom: 8 })
                 .width('100%')
+                .onClick(() => {
+                  this.getUIContext().getRouter().pushUrl({ url: 'pages/HistoryPage' });
+                })
               }, (record: LocalHistoryRecord) => record.id)
             }
             .alignItems(HorizontalAlign.Start)

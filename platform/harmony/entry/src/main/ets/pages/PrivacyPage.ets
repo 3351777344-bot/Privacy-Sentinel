@@ -22,6 +22,7 @@ struct PrivacyPage {
   @State imageName: string = '';
   @State imageId: string = '';
   @State processedImageUri: string = '';
+  @State historyRecordId: string = '';
   @State statusMessage: string = '尚未选择图片';
   @State scanning: boolean = false;
   @State processingMode: ProcessingMode = 'online';
@@ -122,12 +123,15 @@ struct PrivacyPage {
     if (report.detectorMessage && report.detectorMessage.length > 0) {
       this.statusMessage = `${this.statusMessage}\n${report.detectorMessage}`;
     }
-    await HistoryStore.add(this.abilityContext(), {
+    this.historyRecordId = await HistoryStore.add(this.abilityContext(), {
       module: 'privacy',
       moduleLabel: '隐私哨兵',
       riskLevel: report.riskLevel,
       score: report.score,
-      summary: report.summary
+      summary: report.summary,
+      sourceLabel: this.imageName,
+      findings: this.findings,
+      suggestions: this.findings.map((item: Finding): string => item.suggestion)
     });
   }
 
@@ -148,6 +152,10 @@ struct PrivacyPage {
       );
       this.processed = true;
       this.statusMessage = result.message;
+      if (this.historyRecordId.length > 0) {
+        await HistoryStore.updateProcessed(
+          this.abilityContext(), this.historyRecordId, `已使用${this.maskMode}方式脱敏`);
+      }
     } catch (error) {
       this.statusMessage = this.errorMessage(error, '安全预览生成失败');
     } finally {
@@ -166,6 +174,10 @@ struct PrivacyPage {
         this.processedImageUri
       );
       this.statusMessage = '安全图片已保存到系统相册。';
+      if (this.historyRecordId.length > 0) {
+        await HistoryStore.updateAction(
+          this.abilityContext(), this.historyRecordId, '安全图片已保存到系统相册', '已保存');
+      }
     } catch (error) {
       this.statusMessage = this.errorMessage(error, '保存图片失败');
     }
@@ -181,6 +193,10 @@ struct PrivacyPage {
         this.abilityContext(),
         this.processedImageUri
       );
+      if (this.historyRecordId.length > 0) {
+        await HistoryStore.updateAction(
+          this.abilityContext(), this.historyRecordId, '已打开安全图片分享面板', '已分享');
+      }
     } catch (error) {
       this.statusMessage = this.errorMessage(error, '打开系统分享失败');
     }

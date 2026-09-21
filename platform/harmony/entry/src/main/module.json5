@@ -49,9 +49,16 @@
         "skills": [
           {
             "actions": [
-              "ohos.want.action.sendData"
+              "ohos.want.action.sendData",
+              "ohos.want.action.sendMultipleData"
             ],
             "uris": [
+              {
+                "scheme": "file",
+                "utd": "general.file",
+                "type": "general.file",
+                "maxFileSupported": 100
+              },
               {
                 "scheme": "file",
                 "utd": "general.image",
@@ -98,6 +105,18 @@
                 "scheme": "file",
                 "utd": "general.plain-text",
                 "type": "general.plain-text",
+                "maxFileSupported": 100
+              },
+              {
+                "scheme": "file",
+                "utd": "general.archive",
+                "type": "general.archive",
+                "maxFileSupported": 100
+              },
+              {
+                "scheme": "file",
+                "utd": "general.zip-archive",
+                "type": "general.zip-archive",
                 "maxFileSupported": 100
               },
               {

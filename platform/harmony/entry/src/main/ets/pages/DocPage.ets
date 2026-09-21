@@ -249,7 +249,10 @@ struct DocPage {
         moduleLabel: '提交护盾',
         riskLevel: riskLevelOfScore(this.score),
         score: this.score,
-        summary: this.statusMessage
+        summary: this.statusMessage,
+        sourceLabel: this.selectedNames.join('、'),
+        findings: this.findings,
+        suggestions: this.findings.map((item: Finding): string => item.suggestion)
       });
     } catch (error) {
       this.statusMessage = describeError(error, '材料检查失败');

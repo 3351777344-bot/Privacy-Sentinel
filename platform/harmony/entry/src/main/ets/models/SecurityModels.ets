@@ -139,6 +139,14 @@ export interface LocalHistoryRecord {
   score: number;
   summary: string;
   createdAt: number;
+  updatedAt: number;
+  sourceLabel: string;
+  status: string;
+  processed: boolean;
+  processedScore?: number;
+  action: string;
+  findings: Finding[];
+  suggestions: string[];
 }
 
 export interface LocalHistoryInput {
@@ -147,4 +155,8 @@ export interface LocalHistoryInput {
   riskLevel: RiskLevel;
   score: number;
   summary: string;
+  sourceLabel?: string;
+  status?: string;
+  findings?: Finding[];
+  suggestions?: string[];
 }

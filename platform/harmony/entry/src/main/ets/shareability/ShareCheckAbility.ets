@@ -12,12 +12,17 @@ export interface ShareIntent {
   text: string;
 }
 
+type PickerRecord = Record<string, string | number>;
+type PickerRecords = Record<string, PickerRecord[]>;
+
 export const SHARE_INTENT_KEY = 'guardianhub.shareIntent';
 const SHARE_INTENT_CHANGE_EVENT_ID = 'guardianhub.shareIntentChange';
 
 export function parseShareIntent(want: Want): ShareIntent {
   const uris: string[] = [];
-  const stream = want.parameters?.['ability.want.params.stream'];
+  const platformStream = want.parameters?.['ability.params.stream'];
+  const stream = platformStream !== undefined ?
+    platformStream : want.parameters?.['ability.want.params.stream'];
   if (typeof stream === 'string' && stream.length > 0) {
     uris.push(stream);
   } else if (Array.isArray(stream)) {
@@ -31,12 +36,33 @@ export function parseShareIntent(want: Want): ShareIntent {
     uris.push(want.uri);
   }
 
+  let recordsUtd = '';
+  let recordsText = '';
+  const pickerRecordsValue = want.parameters?.['ability.picker.records'];
+  if (pickerRecordsValue !== null && typeof pickerRecordsValue === 'object') {
+    const pickerRecords = pickerRecordsValue as PickerRecords;
+    const recordTypes = Object.keys(pickerRecords);
+    if (recordTypes.length > 0) {
+      recordsUtd = recordTypes[0];
+      const records = pickerRecords[recordsUtd];
+      if (Array.isArray(records) && records.length > 0) {
+        const firstRecord = records[0];
+        const sharedValue = firstRecord['5'] ?? firstRecord['2'];
+        if (typeof sharedValue === 'string') {
+          recordsText = sharedValue;
+        }
+      }
+    }
+  }
+
   let text = '';
   const pickerText = want.parameters?.['ability.picker.text'];
   if (typeof pickerText === 'string') {
     text = pickerText;
   } else if (typeof want.parameters?.['ability.want.params.text'] === 'string') {
     text = want.parameters?.['ability.want.params.text'] as string;
+  } else if (recordsText.length > 0) {
+    text = recordsText;
   }
 
   let utd = '';
@@ -53,6 +79,9 @@ export function parseShareIntent(want: Want): ShareIntent {
     if (typeof mimeType === 'string') {
       utd = mimeType;
     }
+  }
+  if (utd.length === 0) {
+    utd = recordsUtd;
   }
 
   return { uris, utd, text };

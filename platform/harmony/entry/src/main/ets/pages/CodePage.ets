@@ -70,7 +70,10 @@ struct CodePage {
         moduleLabel: '代码卫士',
         riskLevel: report.riskLevel,
         score: report.score,
-        summary: report.summary
+        summary: report.summary,
+        sourceLabel: '代码片段',
+        findings: this.findings,
+        suggestions: report.suggestions
       });
     } catch (error) {
       this.snippetStatus = this.errorMessage(error, '代码检测失败');
@@ -123,7 +126,10 @@ struct CodePage {
         moduleLabel: '代码卫士',
         riskLevel: report.riskLevel,
         score: report.score,
-        summary: report.summary
+        summary: report.summary,
+        sourceLabel: this.archiveName,
+        findings: this.findings,
+        suggestions: report.suggestions
       });
     } catch (error) {
       this.archiveStatus = this.errorMessage(error, '项目包扫描失败');

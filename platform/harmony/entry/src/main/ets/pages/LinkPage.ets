@@ -54,7 +54,10 @@ struct LinkPage {
         moduleLabel: '链接卫士',
         riskLevel: report.riskLevel,
         score: report.score,
-        summary: report.summary
+        summary: report.summary,
+        sourceLabel: this.urlText,
+        findings: this.findings,
+        suggestions: report.suggestions
       });
     } catch (error) {
       this.statusMessage = this.errorMessage(error, '联网检测失败');
