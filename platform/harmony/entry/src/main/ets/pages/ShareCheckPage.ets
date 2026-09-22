@@ -9,10 +9,12 @@ import {
   DetectResponse,
   Finding,
   PrivacyItem,
-  RiskLevel
+  RiskLevel,
+  ScanReport
 } from '../models/SecurityModels';
 import { GuardianApi } from '../services/GuardianApi';
 import { HistoryStore } from '../services/HistoryStore';
+import { LocalRuleEngine } from '../services/LocalRuleEngine';
 import { ProcessedImageService } from '../services/ProcessedImageService';
 import { ShareOutService } from '../services/ShareOutService';
 import { SignatureDB } from '../services/SignatureDB';
@@ -54,6 +56,11 @@ struct ShareCheckPage {
   @State maskMode: string = 'black';
   @State multiImageHint: string = '';
   @State historyRecordId: string = '';
+  /**
+   * Set when the backend was unreachable and the channel degraded to the
+   * on-device rule engine, so the report can stop claiming a full check.
+   */
+  @State fallbackReason: string = '';
 
   private abilityContext(): common.UIAbilityContext {
     return this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -116,6 +123,16 @@ struct ShareCheckPage {
     this.multiImageHint = '';
     this.historyRecordId = '';
     this.sourceText = '';
+    this.fallbackReason = '';
+  }
+
+  /**
+   * Prefix for reports produced by the on-device engine after the backend was
+   * unreachable. Kept explicit so a degraded scan is never mistaken for a
+   * complete one.
+   */
+  private localCheckNotice(): string {
+    return `检测服务不可达，已改用端侧离线检测（${this.fallbackReason}）：结果覆盖范围小于联网检测，建议人工复核。`;
   }
 
   private resolveRoute(intent: ShareIntent): GateRoute {
@@ -400,15 +417,25 @@ struct ShareCheckPage {
       this.phase = 'report';
       await this.recordHistory('link', '链接卫士', report.riskLevel, report.score, report.summary);
     } catch (error) {
-      this.phase = 'offline';
-      this.summary = this.errorMessage(error, '链接检测失败');
+      // The backend is the richer engine, but the on-device rules still catch
+      // plaintext HTTP, punycode, IP literals, shorteners and risky keywords.
+      // Degrading beats leaving the user with a dead end.
+      this.fallbackReason = this.errorMessage(error, '无法连接 GuardianHub 服务');
+      const local: ScanReport = LocalRuleEngine.scanLink(url, '分享面板');
+      this.findings = local.findings;
+      this.score = local.score;
+      this.riskLevel = this.localOverallRisk(local.findings);
+      this.summary = this.localCheckNotice();
+      this.suggestions = ['端侧规则未覆盖域名信誉与跳转链路，请人工确认来源后再访问。'];
+      this.phase = 'report';
+      await this.recordHistory('link', '链接卫士', this.riskLevel, local.score, this.summary);
     }
   }
 
   private async runCodeRoute(code: string): Promise<void> {
     this.sourceLabel = '分享的代码片段';
     this.sourceText = code;
-    this.summary = '正在调用 DeepSeek 联网增强分析…';
+    this.summary = '正在进行代码安全检查…';
     try {
       const report: CodeAnalyzeResponse =
         await GuardianApi.analyzeCodeText(code, 'auto', 'online');
@@ -432,9 +459,31 @@ struct ShareCheckPage {
       this.phase = 'report';
       await this.recordHistory('code', '代码卫士', report.riskLevel, report.score, this.summary);
     } catch (error) {
-      this.phase = 'offline';
-      this.summary = this.errorMessage(error, '代码检测失败');
+      // Fall back to the on-device rule engine so the channel keeps working
+      // without a backend, which is the whole premise of "local first".
+      this.fallbackReason = this.errorMessage(error, '无法连接 GuardianHub 服务');
+      const local: ScanReport = LocalRuleEngine.scanCode(code);
+      this.findings = local.findings;
+      this.score = local.score;
+      this.riskLevel = this.localOverallRisk(local.findings);
+      this.summary = this.localCheckNotice();
+      this.suggestions = ['端侧规则覆盖硬编码凭据、SQL 拼接、命令执行等常见问题，深度分析需联网。'];
+      this.phase = 'report';
+      await this.recordHistory('code', '代码卫士', this.riskLevel, local.score, this.summary);
     }
+  }
+
+  /** Highest risk level across a finding list. */
+  private localOverallRisk(findings: Finding[]): RiskLevel {
+    let risk: RiskLevel = 'low';
+    findings.forEach((item: Finding) => {
+      if (item.riskLevel === 'high') {
+        risk = 'high';
+      } else if (item.riskLevel === 'medium' && risk !== 'high') {
+        risk = 'medium';
+      }
+    });
+    return risk;
   }
 
   private toRiskLevel(verdict: string): RiskLevel {
@@ -457,7 +506,8 @@ struct ShareCheckPage {
         score: score,
         summary: `[分享拦截] ${summary}`,
         sourceLabel: this.sourceLabel,
-        status: '待决策',
+        // A degraded on-device scan must stay distinguishable in history.
+        status: this.fallbackReason.length > 0 ? '端侧离线检测' : '待决策',
         findings: this.findings,
         suggestions: this.suggestions
       });
@@ -787,7 +837,7 @@ struct ShareCheckPage {
           if (this.phase === 'offline') {
             SectionCard({
               title: '检测服务不可达',
-              copy: '该内容类型依赖联网检测服务。请确认后端服务已启动，或稍后重试；文档与 ZIP 文件支持端侧离线检测。'
+              copy: '该内容类型依赖联网检测服务。请确认后端服务已启动，或稍后重试；文件（含 ZIP）、链接与代码片段支持端侧离线检测。'
             }) {
               Button('重试检测')
                 .width('100%')
