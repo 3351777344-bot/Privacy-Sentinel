@@ -16,6 +16,7 @@ import { GuardianApi } from '../services/GuardianApi';
 import { HistoryStore } from '../services/HistoryStore';
 import { LocalRuleEngine } from '../services/LocalRuleEngine';
 import { ProcessedImageService } from '../services/ProcessedImageService';
+import { QrClassification, QrContentService } from '../services/QrContentService';
 import { ShareOutService } from '../services/ShareOutService';
 import { SignatureDB } from '../services/SignatureDB';
 import { ThreatScanner } from '../services/ThreatScanner';
@@ -211,12 +212,30 @@ struct ShareCheckPage {
   private async runImageRoute(imageUri: string): Promise<void> {
     this.sourceUri = imageUri;
     this.sourceLabel = this.fileNameFromUri(imageUri);
-    this.summary = '正在进行 OCR、隐私规则和 Qwen 联网增强检测…';
+    this.summary = '正在本机解析二维码，并执行 OCR 隐私检测…';
+
+    // Decode the code on-device first. This keeps a payment credential from
+    // having to leave the device to be recognised, and gives the channel a
+    // usable result when the backend is unreachable.
+    const qrFindings: Finding[] = [];
+    try {
+      const qr: QrClassification = await QrContentService.decodeImage(imageUri);
+      if (qr.found) {
+        qrFindings.push({
+          title: qr.label,
+          evidence: qr.text,
+          suggestion: qr.suggestion,
+          riskLevel: this.toRiskLevel(qr.riskLevel)
+        });
+      }
+    } catch (_) {
+    }
+
     try {
       const report: DetectResponse =
         await GuardianApi.detectPrivacy(imageUri, this.sourceLabel, 'online');
       this.imageId = report.imageId;
-      this.findings = report.items.map((item: PrivacyItem): Finding => {
+      const serverFindings: Finding[] = report.items.map((item: PrivacyItem): Finding => {
         return {
           title: item.label,
           evidence: item.text.length > 0 ? item.text : report.summary,
@@ -224,19 +243,63 @@ struct ShareCheckPage {
           riskLevel: item.riskLevel
         };
       });
+      // Keep the on-device verdict for the code and append the server's OCR
+      // findings, skipping the server's own code entry to avoid duplicates.
+      this.findings = qrFindings.concat(
+        serverFindings.filter((item: Finding): boolean => !this.isQrFinding(item.title))
+      );
       this.score = report.score;
-      this.riskLevel = report.riskLevel;
+      this.riskLevel = this.highestRisk(this.findings, report.riskLevel);
       const modeHint = report.detectorMode ? ` · 引擎 ${report.detectorMode}` : '';
       this.summary = `${report.summary}${modeHint}`;
       if (report.detectorMessage && report.detectorMessage.length > 0) {
         this.summary = `${this.summary}\n${report.detectorMessage}`;
       }
       this.phase = 'report';
-      await this.recordHistory('privacy', '隐私哨兵', report.riskLevel, report.score, this.summary);
+      await this.recordHistory('privacy', '隐私哨兵', this.riskLevel, this.score, this.summary);
     } catch (error) {
+      if (qrFindings.length > 0) {
+        // The code was read locally, so the channel still produces a real
+        // finding instead of a dead end.
+        this.findings = qrFindings;
+        this.score = this.localScore(qrFindings);
+        this.riskLevel = this.localOverallRisk(qrFindings);
+        this.fallbackReason = this.errorMessage(error, '无法连接 GuardianHub 服务');
+        this.summary = `检测服务不可达，已改用端侧二维码解析：${this.findings[0].title}。` +
+          '本机未执行 OCR，手机号、证件号、地址等文字类隐私未覆盖，建议人工复核。';
+        this.suggestions = ['联网后可执行完整 OCR 检测，覆盖文字类隐私信息。'];
+        this.phase = 'report';
+        await this.recordHistory('privacy', '隐私哨兵', this.riskLevel, this.score, this.summary);
+        return;
+      }
       this.phase = 'offline';
       this.summary = this.errorMessage(error, '图片检测失败');
     }
+  }
+
+  /** A code finding is reported once, by the on-device decoder. */
+  private isQrFinding(title: string): boolean {
+    return title.indexOf('码') >= 0 && title.indexOf('二维码') >= 0;
+  }
+
+  private highestRisk(findings: Finding[], fallback: RiskLevel): RiskLevel {
+    const local: RiskLevel = this.localOverallRisk(findings);
+    const order: number[] = [local, fallback].map((level: RiskLevel): number => {
+      if (level === 'high') {
+        return 2;
+      }
+      return level === 'medium' ? 1 : 0;
+    });
+    return order[0] >= order[1] ? local : fallback;
+  }
+
+  /** Same deduction scheme as the on-device rule engine. */
+  private localScore(findings: Finding[]): number {
+    let deduction = 0;
+    findings.forEach((item: Finding) => {
+      deduction += item.riskLevel === 'high' ? 28 : (item.riskLevel === 'medium' ? 16 : 7);
+    });
+    return Math.max(0, 100 - deduction);
   }
 
   private async processImage(): Promise<void> {
