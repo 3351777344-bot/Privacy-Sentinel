@@ -11,6 +11,7 @@ from modules.risk_scoring import calculate_security_score, highest_risk
 from schemas.models import Box, DetectResponse, PrivacyItem
 
 from .mock_detector import detect_privacy_items as detect_demo_items
+from .qr_content import classify_qr_payload
 
 
 OCR_CONFIDENCE_THRESHOLD = 0.55
@@ -142,27 +143,34 @@ def _detect_qr_codes(image_path: str, image_width: int, image_height: int, image
             return []
 
         detector = cv2.QRCodeDetector()
-        candidates: list[tuple[Any, float, float, int, int]] = []
+        # Each candidate keeps the decoded payload alongside its geometry so the
+        # report can state the real risk instead of assuming every code is high.
+        candidates: list[tuple[Any, float, float, int, int, str]] = []
 
         def consider(view, scale_x: float, scale_y: float, offset_x: int = 0, offset_y: int = 0) -> None:
             try:
                 found, points = detector.detect(view)
                 if found:
                     for pts in _iter_qr_point_sets(points):
-                        candidates.append((pts, scale_x, scale_y, offset_x, offset_y))
+                        candidates.append((pts, scale_x, scale_y, offset_x, offset_y, ""))
             except (AttributeError, cv2.error):
                 pass
             try:
-                detected, _values, points, _straight = detector.detectAndDecodeMulti(view)
+                detected, values, points, _straight = detector.detectAndDecodeMulti(view)
                 if detected or points is not None:
-                    for pts in _iter_qr_point_sets(points):
-                        candidates.append((pts, scale_x, scale_y, offset_x, offset_y))
+                    decoded = list(values) if values is not None else []
+                    for index, pts in enumerate(_iter_qr_point_sets(points)):
+                        value = ""
+                        if index < len(decoded) and isinstance(decoded[index], str):
+                            value = decoded[index].strip()
+                        candidates.append((pts, scale_x, scale_y, offset_x, offset_y, value))
             except (AttributeError, cv2.error):
                 pass
             try:
-                _value, points, _straight = detector.detectAndDecode(view)
+                value, points, _straight = detector.detectAndDecode(view)
+                decoded_value = value.strip() if isinstance(value, str) else ""
                 for pts in _iter_qr_point_sets(points):
-                    candidates.append((pts, scale_x, scale_y, offset_x, offset_y))
+                    candidates.append((pts, scale_x, scale_y, offset_x, offset_y, decoded_value))
             except (AttributeError, cv2.error):
                 pass
 
@@ -181,7 +189,12 @@ def _detect_qr_codes(image_path: str, image_width: int, image_height: int, image
             consider(bordered, 1.0 / scale, 1.0 / scale, -border, -border)
 
         qr_boxes: list[Box] = []
-        for pts, scale_x, scale_y, offset_x, offset_y in candidates:
+        qr_payloads: list[str] = []
+        # The three detection passes report the same code with near-identical
+        # geometry, but only some of them return the payload (`detect` locates
+        # without decoding). Deduplicate by geometry while keeping the decoded
+        # value, otherwise the value-less hit wins and the content is lost.
+        for pts, scale_x, scale_y, offset_x, offset_y, payload in candidates:
             mapped = []
             for point in pts:
                 x = (float(point[0]) + offset_x) * scale_x
@@ -190,29 +203,54 @@ def _detect_qr_codes(image_path: str, image_width: int, image_height: int, image
             box = _box_from_points(mapped, image_width, image_height, padding=8)
             if box.width < 12 or box.height < 12:
                 continue
-            # Deduplicate heavily overlapping detections.
-            if any(
-                abs(box.x - existing.x) < 12
-                and abs(box.y - existing.y) < 12
-                and abs(box.width - existing.width) < 24
-                and abs(box.height - existing.height) < 24
-                for existing in qr_boxes
-            ):
+            match_index = next(
+                (
+                    index
+                    for index, existing in enumerate(qr_boxes)
+                    if abs(box.x - existing.x) < 12
+                    and abs(box.y - existing.y) < 12
+                    and abs(box.width - existing.width) < 24
+                    and abs(box.height - existing.height) < 48
+                ),
+                -1,
+            )
+            if match_index >= 0:
+                if not qr_payloads[match_index] and payload:
+                    qr_payloads[match_index] = payload
                 continue
             qr_boxes.append(box)
+            qr_payloads.append(payload)
 
-        return [
-            PrivacyItem(
-                id=f"{image_id}_qr_{index}",
-                type="qr_code",
-                label="二维码",
-                text="二维码内容已隐藏",
-                riskLevel="high",
-                box=box,
-                suggestion="二维码可能包含账号、订单或跳转信息，建议遮挡或确认内容后再分享。",
+        items: list[PrivacyItem] = []
+        for index, box in enumerate(qr_boxes, start=1):
+            payload = qr_payloads[index - 1] if index - 1 < len(qr_payloads) else ""
+            if payload:
+                classified = classify_qr_payload(payload)
+                items.append(
+                    PrivacyItem(
+                        id=f"{image_id}_qr_{index}",
+                        type="qr_code",
+                        label=classified["label"],
+                        text=classified["text"],
+                        riskLevel=classified["riskLevel"],
+                        box=box,
+                        suggestion=classified["suggestion"],
+                    )
+                )
+                continue
+            # Geometry found but the payload could not be decoded: be honest about it.
+            items.append(
+                PrivacyItem(
+                    id=f"{image_id}_qr_{index}",
+                    type="qr_code",
+                    label="二维码（未解出内容）",
+                    text="二维码内容未能解码",
+                    riskLevel="medium",
+                    box=box,
+                    suggestion="未解出内容时无法判断风险，建议遮挡或向发送者确认用途。",
+                )
             )
-            for index, box in enumerate(qr_boxes, start=1)
-        ]
+        return items
     except (ImportError, RuntimeError, ValueError):
         return []
 
