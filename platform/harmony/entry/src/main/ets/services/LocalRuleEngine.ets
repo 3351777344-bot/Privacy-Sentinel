@@ -25,6 +25,18 @@ export class LocalRuleEngine {
         suggestion: '改用系统安全存储或运行时配置注入。',
         riskLevel: 'high'
       });
+    } else if (/(^|[^A-Za-z0-9_])(api[_-]?key|secret|token|password|passwd|access[_-]?key|private[_-]?key)(?![A-Za-z0-9_])\s*[:=]\s*(?!['"])(?!\s*(os\.|sys\.|self\.|process\.|config\.|settings\.|env\.|getenv))(?![A-Za-z_]\w*\s*[(.\[])\S{4,}/i.test(code)) {
+      // Unquoted credential values are just as common in real snippets
+      // (`token = sk-live-abc123`). The leading capture group replaces a
+      // lookbehind, which the ArkTS bytecode compiler handles poorly; the
+      // trailing guards skip call/attribute reads such as `get_key()`.
+      // Kept in sync with the backend rule code_001b.
+      findings.push({
+        title: '疑似硬编码凭据（未加引号）',
+        evidence: '检测到未经引号包裹的密钥、令牌或密码赋值。',
+        suggestion: '改用系统安全存储或运行时配置注入。',
+        riskLevel: 'high'
+      });
     }
     if (/(execute|query)\s*\([^)]*\+|SELECT.+\$\{/i.test(code)) {
       findings.push({

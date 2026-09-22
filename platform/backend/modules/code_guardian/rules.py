@@ -35,9 +35,34 @@ CODE_RULES = [
         suggestion="使用环境变量、密钥管理服务或未提交的本地配置文件保存敏感凭据。",
     ),
     CodeRule(
+        id="code_001b",
+        type="hardcoded_secret",
+        title="疑似硬编码密钥（未加引号）",
+        risk_level="high",
+        patterns=(
+            # Unquoted credential assignment: `token = sk-live-abc123`.
+            # Uses a lookbehind/lookahead instead of \b so `my_api_key` is not
+            # mistaken for `api_key`, and requires 4+ non-space characters so a
+            # lone FLAG=1 or DEBUG=true does not fire. The value must not look
+            # like a call/attribute read (`get_key()`, `os.environ[...]`), which
+            # is an indirection rather than a literal.
+            _compile(
+                r"(?<![A-Za-z0-9_])"
+                r"(api[_-]?key|secret|token|password|passwd|access[_-]?key|private[_-]?key)"
+                r"(?![A-Za-z0-9_])"
+                r"\s*[:=]\s*"
+                r"(?![\"'])"
+                r"(?!\s*(?:os\.|sys\.|self\.|process\.|config\.|settings\.|env\.|getenv|os\.environ))"
+                r"(?!\s*[A-Za-z_]\w*\s*[(.\[])"
+                r"\S{4,}"
+            ),
+        ),
+        reason="代码中疑似直接写入密钥、口令或私钥，提交后可能导致凭据泄露。",
+        suggestion="使用环境变量、密钥管理服务或未提交的本地配置文件保存敏感凭据。",
+    ),
+    CodeRule(
         id="code_002",
-        type="sql_injection",
-        title="SQL 拼接注入风险",
+        type="sql_injection",        title="SQL 拼接注入风险",
         risk_level="high",
         patterns=(
             _compile(r"(select|insert|update|delete).*(\+|%\s*\(|format\(|\$\{|f['\"]).*(where|from|into|set)?"),
