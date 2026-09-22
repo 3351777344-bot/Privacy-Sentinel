@@ -264,10 +264,17 @@ def _detect_vision_api(
     qwen_items = detect_with_qwen(image_path, image_id, width, height)
     if not qwen_items:
         items = [_enrich_item(item) for item in base_result.items]
+        if _qwen_active():
+            # The model was reachable but unusable: genuine failure, so say so.
+            fallback_message = "Qwen VL API 调用失败，已回退到本地 OCR 检测。"
+        else:
+            fallback_message = (
+                "Qwen VL 未启用（默认关闭），本次为纯本机 OCR 检测，图像未离开设备。"
+            )
         return base_result.model_copy(
             update={
                 "detectorMode": "ocr",
-                "detectorMessage": "Qwen VL API 调用失败，已回退到本地 OCR 检测。",
+                "detectorMessage": fallback_message,
                 "items": items,
                 "riskLevel": highest_risk([i.riskLevel for i in items]),
                 "score": calculate_security_score([i.riskLevel for i in items]),
@@ -296,6 +303,16 @@ def _detect_vision_api(
     )
 
 
+def _qwen_active() -> bool:
+    """True only when Qwen VL will really be called.
+
+    Every user-facing message is derived from this check instead of from the
+    configured engine name alone, so the UI never claims an external model
+    analysed the image when it never ran.
+    """
+    return bool(settings.qwen_enabled and settings.qwen_api_key)
+
+
 def _detect_hybrid(
     base_result: DetectResponse,
     image_path: str,
@@ -316,13 +333,31 @@ def _detect_hybrid(
 
     levels = [item.riskLevel for item in enhanced_items]
     labels = ", ".join(dict.fromkeys(item.label for item in enhanced_items))
+    if _qwen_active():
+        summary = (
+            f"混合检测发现 {len(enhanced_items)} 个隐私区域（{labels}），"
+            f"其中 Qwen VL 新增 {qwen_new_count} 项、验证 {qwen_verified_count} 项。"
+        )
+        detector_message = (
+            f"Hybrid mode: 本地 OCR ({settings.ocr_engine}) + "
+            f"Qwen VL ({settings.qwen_model}) 联合分析。"
+        )
+    else:
+        summary = (
+            f"本地检测发现 {len(enhanced_items)} 个隐私区域（{labels}）。"
+            "Qwen VL 未启用，未进行联网图像分析。"
+        )
+        detector_message = (
+            f"纯本机分析（未联网）：OCR={settings.ocr_engine}，QR={settings.qr_engine}，"
+            f"face={settings.face_engine}。Qwen VL 未启用（默认关闭），图像未离开设备。"
+        )
     return DetectResponse(
         imageId=image_id,
         originalImageUrl=original_url,
         riskLevel=highest_risk(levels),
         score=calculate_security_score(levels),
-        summary=f"混合检测发现 {len(enhanced_items)} 个隐私区域（{labels}），其中 Qwen VL 新增 {qwen_new_count} 项、验证 {qwen_verified_count} 项。",
+        summary=summary,
         detectorMode="hybrid",
-        detectorMessage=f"Hybrid mode: 本地 OCR ({settings.ocr_engine}) + Qwen VL ({settings.qwen_model}) 联合分析。",
+        detectorMessage=detector_message,
         items=enhanced_items,
     )
