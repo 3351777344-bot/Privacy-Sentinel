@@ -10,13 +10,21 @@ import type {
   QrDecodeResponse
 } from '../types/privacy';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
 
 const FETCH_TIMEOUT_MS = 30_000; // 30 seconds
 const DETECT_LOCAL_TIMEOUT_MS = 60_000;
 const DETECT_ONLINE_TIMEOUT_MS = 120_000;
 
 async function fetchWithTimeout(input: RequestInfo, init?: RequestInit, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  if (init?.method === 'POST') {
+    if (!window.confirm(`本次操作会向 ${API_BASE_URL} 发送所选原文件或输入文本及必要元数据，用于分析或处理。联网增强还可能调用已配置的模型服务。是否授权本次发送？`)) {
+      throw new Error('未授权上传，未发送数据。');
+    }
+    const headers = new Headers(init.headers);
+    headers.set('X-Guardian-Consent', 'explicit');
+    init = { ...init, headers };
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

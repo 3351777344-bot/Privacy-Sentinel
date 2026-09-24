@@ -1,4 +1,5 @@
 import { Finding, RiskLevel } from '../models/SecurityModels';
+import { ScanPolicy, Verdict } from '../services/ScanPolicy';
 
 @Component
 struct RiskBadge {
@@ -37,6 +38,8 @@ struct RiskBadge {
 
 @Component
 export struct ResultPanel {
+  @Prop contextCopy: string = '来源与传输状态请查看检测说明';
+  @Prop verdict: Verdict = 'unknown';
   @Prop findings: Finding[] = [];
   @Prop score: number = 100;
   @Prop emptyCopy: string = '完成检测后，这里会展示风险证据和处理建议。';
@@ -61,7 +64,7 @@ export struct ResultPanel {
             .fontSize(17)
             .fontWeight(FontWeight.Bold)
             .fontColor('#172033')
-          Text(this.findings.length > 0 ? `${this.findings.length} 项需要关注` : '等待检测')
+          Text(ScanPolicy.label(this.verdict))
             .fontSize(12)
             .fontColor('#64748B')
             .margin({ top: 3 })
@@ -69,7 +72,7 @@ export struct ResultPanel {
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
 
-        Text(`${this.score}`)
+        Text(this.verdict === 'unknown' ? '—' : `${this.score}`)
           .fontSize(28)
           .fontWeight(FontWeight.Bold)
           .fontColor(this.score < 60 ? '#DC2626' : '#2563EB')
@@ -80,6 +83,9 @@ export struct ResultPanel {
           .margin({ bottom: 5, left: 2 })
       }
       .width('100%')
+
+      Text(this.contextCopy)
+        .fontSize(12).fontColor('#475569').lineHeight(20).margin({ top: 10 }).width('100%')
 
       if (this.findings.length === 0) {
         Text(this.emptyCopy)

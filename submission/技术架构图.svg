@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="760" viewBox="0 0 1100 760">
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#334155"/></marker></defs>
+<rect width="1100" height="760" fill="white"/>
+<g font-family="Microsoft YaHei, sans-serif" text-anchor="middle" fill="#172033">
+<text x="550" y="48" font-size="28">GuardianHub 数据流与授权边界</text>
+<text x="550" y="82" font-size="17">默认端侧检测　增强分析逐次授权　未命中不代表安全</text>
+<g stroke="#64748b" fill="#eff6ff" stroke-width="2">
+<rect x="300" y="120" width="500" height="62" rx="10"/>
+<rect x="300" y="220" width="500" height="62" rx="10"/>
+<rect x="120" y="322" width="860" height="72" rx="10"/>
+<rect x="300" y="438" width="500" height="62" rx="10"/>
+<rect x="60" y="560" width="310" height="72" rx="10" fill="#ecfdf5"/>
+<rect x="430" y="560" width="610" height="72" rx="10" fill="#fff7ed"/>
+<rect x="430" y="670" width="610" height="55" rx="10" fill="#fff7ed"/>
+</g>
+<text x="550" y="159" font-size="21">HarmonyOS 分享菜单</text>
+<text x="550" y="259" font-size="21">ShareCheckAbility 接收与路由</text>
+<text x="550" y="351" font-size="20">端侧二维码解析　链接与代码规则　ZIP 与文档结构扫描</text>
+<text x="550" y="378" font-size="16">凭证二维码原图禁止增强上传　图片文字 OCR 未覆盖</text>
+<text x="550" y="477" font-size="21">风险原因与建议　用户决策</text>
+<text x="215" y="591" font-size="20">保留本地结果与历史</text>
+<text x="215" y="617" font-size="16">继续分享由用户选择</text>
+<text x="735" y="591" font-size="20">明确授权本次上传</text>
+<text x="735" y="617" font-size="16">提示后端地址　内容类型　文件数量与字节</text>
+<text x="735" y="704" font-size="19">可选后端 OCR 与模型 → 标注远程来源的结果</text>
+</g>
+<g fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)">
+<path d="M550 182V218"/><path d="M550 282V320"/><path d="M550 394V436"/>
+<path d="M440 500L215 558"/><path d="M660 500L735 558"/><path d="M735 632V668"/>
+</g></svg>

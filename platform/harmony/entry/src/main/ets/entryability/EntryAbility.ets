@@ -11,14 +11,14 @@ export default class EntryAbility extends UIAbility {
       this.context.getApplicationContext()
         .setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to set color mode: %{public}s', JSON.stringify(error));
+      hilog.error(DOMAIN, TAG, 'color_mode_failed');
     }
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
     windowStage.loadContent('pages/Index', (error) => {
       if (error.code) {
-        hilog.error(DOMAIN, TAG, 'Failed to load content: %{public}s', JSON.stringify(error));
+        hilog.error(DOMAIN, TAG, 'main_view_failed');
       }
     });
   }

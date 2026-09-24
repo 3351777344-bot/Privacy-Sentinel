@@ -22,4 +22,13 @@ local.properties
 _archive/
 tmp/
 test/
+.pytest_cache/
+.env
+**/.env
+*.p12
+*.p7b
+*.cer
+*.pem
+*.key
+platform/harmony/build-profile.local.json5
 platform/samples/generated/

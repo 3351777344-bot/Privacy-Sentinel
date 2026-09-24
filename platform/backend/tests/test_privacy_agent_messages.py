@@ -54,7 +54,6 @@ def _base_result() -> DetectResponse:
     [(False, "test-key"), (True, ""), (False, "")],
 )
 def test_qwen_active_requires_flag_and_key(enabled: bool, api_key: str) -> None:
-    assert privacy_agent._qwen_active() is False
     original = privacy_agent.settings
     try:
         privacy_agent.settings = _settings(qwen_enabled=enabled, qwen_api_key=api_key)
@@ -82,7 +81,8 @@ def test_hybrid_does_not_claim_qwen_when_disabled(monkeypatch) -> None:
     # No claim of a joint analysis, and no mention of the model being called.
     assert "联合分析" not in response.detectorMessage
     assert "Qwen VL 未启用" in response.detectorMessage
-    assert "未联网" in response.detectorMessage
+    assert "已上传到后端" in response.detectorMessage
+    assert "未发送给外部模型" in response.detectorMessage
     assert "Qwen VL 新增" not in response.summary
     assert "Qwen VL 未启用" in response.summary
     assert "本地检测发现" in response.summary

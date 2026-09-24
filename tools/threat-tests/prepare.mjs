@@ -35,6 +35,11 @@ const OUT_ROOT = path.resolve(here, '.build');
 const ENTRY_FILES = [
   'models/SecurityModels.ets',
   'models/ThreatModels.ets',
+  'services/ScanPolicy.ets',
+  'services/LocalRuleEngine.ets',
+  'services/QrRules.ets',
+  'services/PixelMask.ets',
+  'services/ArchiveReview.ets',
   'services/RequirementAudit.ets',
   'services/ThreatScanner.ets'
 ];

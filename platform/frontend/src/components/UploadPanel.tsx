@@ -61,7 +61,7 @@ export default function UploadPanel({
       <ProcessingModeSelector value={processingMode} onChange={onProcessingModeChange} />
       <p className="mode-note">
         {processingMode === 'local'
-          ? '本地模式：OCR、二维码与规则检测均在本机完成，图片不会发送到模型服务。'
+          ? '后端规则模式：授权后上传原图至配置的后端执行 OCR 与规则检测；不是浏览器离线分析。敏感二维码请使用鸿蒙端侧检测。'
           : '联网模式：图片将发送到已配置的 Qwen VL 服务增强识别；服务不可用时自动回退本地检测。'}
       </p>
       <div className={`upload-box ${file ? 'has-file' : ''} ${loading ? 'scanning' : ''} ${fileError ? 'upload-error' : ''}`} onClick={() => !loading && inputRef.current?.click()} role="button" tabIndex={0} onKeyDown={handleKeyDown}>

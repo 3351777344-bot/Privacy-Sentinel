@@ -1,5 +1,5 @@
 import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
+import { PrivacyLogger } from '../services/PrivacyLogger';
 import { window } from '@kit.ArkUI';
 import { emitter } from '@kit.BasicServicesKit';
 
@@ -89,28 +89,24 @@ export function parseShareIntent(want: Want): ShareIntent {
 
 export default class ShareCheckAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
-    hilog.info(DOMAIN, TAG, 'onCreate want: %{public}s', JSON.stringify(want));
     this.publishIntent(want);
   }
 
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
-    hilog.info(DOMAIN, TAG, 'onNewWant want: %{public}s', JSON.stringify(want));
     this.publishIntent(want);
     emitter.emit(SHARE_INTENT_CHANGE_EVENT_ID);
   }
 
   private publishIntent(want: Want): void {
     const intent = parseShareIntent(want);
-    hilog.info(DOMAIN, TAG,
-      'parsed share intent: uris=%{public}s utd=%{public}s text=%{public}s',
-      JSON.stringify(intent.uris), intent.utd, intent.text.slice(0, 100));
+    PrivacyLogger.logShareReceived(intent.uris.length, intent.text.length > 0);
     AppStorage.setOrCreate<ShareIntent>(SHARE_INTENT_KEY, intent);
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
     windowStage.loadContent('pages/ShareCheckPage', (error) => {
       if (error.code) {
-        hilog.error(DOMAIN, TAG, 'Failed to load content: %{public}s', JSON.stringify(error));
+        PrivacyLogger.logScanError();
       }
     });
   }

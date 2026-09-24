@@ -1,4 +1,5 @@
 import { Finding, ScanReport } from '../models/SecurityModels';
+import { ScanPolicy } from './ScanPolicy';
 
 function scoreFor(findings: Finding[]): number {
   let deduction: number = 0;
@@ -73,7 +74,7 @@ export class LocalRuleEngine {
 
     return {
       findings: findings,
-      score: scoreFor(findings)
+      score: ScanPolicy.score(findings)
     };
   }
 
@@ -134,7 +135,7 @@ export class LocalRuleEngine {
 
     return {
       findings: findings,
-      score: scoreFor(findings)
+      score: ScanPolicy.score(findings)
     };
   }
 
@@ -188,7 +189,7 @@ export class LocalRuleEngine {
 
     return {
       findings: findings,
-      score: scoreFor(findings)
+      score: ScanPolicy.score(findings)
     };
   }
 }

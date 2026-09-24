@@ -45,8 +45,8 @@ export function ProcessingModeSelector({
   return (
     <div className="processing-mode" role="group" aria-label="处理模式">
       <button className={value === 'local' ? 'selected' : ''} onClick={() => onChange('local')} type="button">
-        <strong>本地处理</strong>
-        <span>材料仅在本机分析</span>
+        <strong>私有后端规则</strong>
+        <span>需授权上传 不调用模型</span>
       </button>
       <button
         className={value === 'online' ? 'selected' : ''}
