@@ -96,7 +96,11 @@ struct PrivacyPage {
         sourceLabel: '本地图片', findings: this.findings, suggestions: ['遮挡二维码后仍需检查文字与人物。']
       });
       if (ScanPolicy.shouldEnhance(mode, enhance)) {
-        if (this.qrReport.uploadBlocked) {
+        if (this.qrReport.uploadBlocked && this.qrReport.status !== 'failed') {
+          // Only a *decoded* sensitive code blocks the upload. A decode failure
+          // is not evidence of a payment code, so it must not silently disable
+          // the whole enhancement path (the file picker cannot always be read
+          // by Scan Kit, which made this a dead end).
           this.statusMessage += ' 原图增强已阻断，可使用端侧黑块遮挡。';
         } else {
           try {
@@ -157,7 +161,12 @@ struct PrivacyPage {
           this.statusMessage = '远程处理完成，请复核遮挡范围。';
         } finally { this.resultMeta = '远程遮挡 · ' + transfer.describe(); }
       } else {
-        throw new Error('无可靠二维码坐标且未进行联网文字识别，无法自动定位；请手动编辑图片。');
+        // Say what the user can actually do: hybrid mode needs one enhancement
+        // pass first, because the mask needs either QR coordinates or the
+        // server-side item boxes.
+        throw new Error(this.processingMode === 'local_only'
+          ? '仅本地模式只能遮挡二维码；切换到本地优先或联网分析并执行一次增强后，可遮挡文字与人物。'
+          : '尚未执行增强分析：请先点上方「增强分析 需本次授权」，得到隐私区域后再生成安全预览。');
       }
       this.processed = true;
       await HistoryStore.updateProcessed(this.abilityContext(), this.historyRecordId, this.statusMessage);
@@ -352,6 +361,21 @@ struct PrivacyPage {
                     this.processImage();
                   })
 
+                // Always render the outcome, not only on success: a failed mask
+                // used to leave `processed` false, so the message was hidden
+                // inside the success block and the button looked dead.
+                if (this.statusMessage.length > 0) {
+                  Text(this.statusMessage)
+                    .fontSize(12)
+                    .fontColor(this.processed ? '#166534' : '#B91C1C')
+                    .lineHeight(19)
+                    .padding(12)
+                    .backgroundColor(this.processed ? '#F0FDF4' : '#FEF2F2')
+                    .borderRadius(12)
+                    .margin({ top: 10 })
+                    .width('100%')
+                }
+
                 if (this.processed) {
                   Image(this.processedImageUri)
                     .width('100%')
@@ -360,16 +384,6 @@ struct PrivacyPage {
                     .backgroundColor('#E2E8F0')
                     .borderRadius(12)
                     .margin({ top: 12 })
-
-                  Text(this.statusMessage)
-                    .fontSize(12)
-                    .fontColor('#166534')
-                    .lineHeight(19)
-                    .padding(12)
-                    .backgroundColor('#F0FDF4')
-                    .borderRadius(12)
-                    .margin({ top: 10 })
-                    .width('100%')
 
                   Row() {
                     Button('保存到相册')

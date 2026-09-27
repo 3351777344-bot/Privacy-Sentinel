@@ -44,7 +44,15 @@ assert.equal(qr.codes[0].url, raw);
 assert.ok(!qr.codes[0].text.includes('secret123'));
 assert.equal(qr.uploadBlocked, true);
 assert.equal(QrRules.analyze([]).status, 'not_found');
-assert.equal(QrRules.analyze([], true).status, 'failed');
+const decodeFailure = QrRules.analyze([], true);
+assert.equal(decodeFailure.status, 'failed');
+// Fail-closed at the rule layer: an unreadable payload must never be treated as
+// "no QR code". The page keeps the enhancement path available in this case
+// (a decode failure is not evidence of a payment code), so this flag is the
+// safety net that still forbids uploading the original image unverified.
+assert.equal(decodeFailure.uploadBlocked, true);
+assert.match(decodeFailure.note, /解析失败/);
+assert.equal(QrRules.analyze([]).uploadBlocked, false);
 
 const pixels = new Uint8Array(4 * 4 * 4).fill(255);
 PixelMask.apply(pixels, 4, 4, [{ left: 1, top: 1, right: 2, bottom: 2 }]);
