@@ -74,6 +74,16 @@ class Settings:
     # finish_reason=length.
     deepseek_max_tokens: int = _int_env("GUARDIANHUB_DEEPSEEK_MAX_TOKENS", 8192)
     vision_image_max_side: int = _int_env("GUARDIANHUB_VISION_IMAGE_MAX_SIDE", 1280)
+    # Per-client request budgets. The public deployment has no account
+    # authentication and three endpoints can spend paid model quota, so those
+    # paths draw from a tighter budget than the rest of the API. Defaults sit far
+    # above real usage; set a limit to 0 to disable that budget, or turn the
+    # whole feature off with GUARDIANHUB_RATE_LIMIT_ENABLED=false.
+    rate_limit_enabled: bool = _bool_env("GUARDIANHUB_RATE_LIMIT_ENABLED", True)
+    rate_limit_api_requests: int = _int_env("GUARDIANHUB_RATE_LIMIT_API_REQUESTS", 240)
+    rate_limit_api_window_seconds: int = _int_env("GUARDIANHUB_RATE_LIMIT_API_WINDOW_SECONDS", 60)
+    rate_limit_model_requests: int = _int_env("GUARDIANHUB_RATE_LIMIT_MODEL_REQUESTS", 30)
+    rate_limit_model_window_seconds: int = _int_env("GUARDIANHUB_RATE_LIMIT_MODEL_WINDOW_SECONDS", 300)
 
 
 settings = Settings()

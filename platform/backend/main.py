@@ -52,6 +52,7 @@ from schemas.models import (
     PrivacyProcessRequest,
     QrDecodeResponse,
 )
+from rate_limit import RateLimitMiddleware, RateLimiter
 from storage.history_store import HistoryStore
 
 
@@ -69,6 +70,18 @@ history_store = HistoryStore(HISTORY_DATABASE, HISTORY_FILE)
 Image.MAX_IMAGE_PIXELS = settings.max_image_pixels
 
 app = FastAPI(title="GuardianHub API", version="0.5.0")
+# Added before CORS on purpose: middleware registered last sits outermost, so
+# CORS must come second for rate-limited (429) replies to keep CORS headers.
+if settings.rate_limit_enabled:
+    app.add_middleware(
+        RateLimitMiddleware,
+        limiter=RateLimiter(
+            api_limit=settings.rate_limit_api_requests,
+            api_window=settings.rate_limit_api_window_seconds,
+            model_limit=settings.rate_limit_model_requests,
+            model_window=settings.rate_limit_model_window_seconds,
+        ),
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
