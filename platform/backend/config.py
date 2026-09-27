@@ -73,6 +73,14 @@ class Settings:
     # to leave room for both: too small and the completion comes back empty with
     # finish_reason=length.
     deepseek_max_tokens: int = _int_env("GUARDIANHUB_DEEPSEEK_MAX_TOKENS", 8192)
+    # Doc Shield's online pass reads a pasted brief and then the extracted
+    # material text. Both are excerpts by design: the brief is a short notice,
+    # and a whole thesis would both overflow the context and send far more of the
+    # student's writing to the model than the check needs. The local word-count
+    # and privacy checks still run over the full text, so truncation only limits
+    # what the model *reads*, never what the report measures.
+    doc_content_chars_per_file: int = _int_env("GUARDIANHUB_DOC_CONTENT_CHARS_PER_FILE", 6000)
+    doc_content_chars_total: int = _int_env("GUARDIANHUB_DOC_CONTENT_CHARS_TOTAL", 12000)
     vision_image_max_side: int = _int_env("GUARDIANHUB_VISION_IMAGE_MAX_SIDE", 1280)
     # Per-client request budgets. The public deployment has no account
     # authentication and three endpoints can spend paid model quota, so those

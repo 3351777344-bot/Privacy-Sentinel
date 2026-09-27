@@ -108,6 +108,15 @@ Copy-Item .env.example .env
 发给模型的是**提取出的纯文本节选**（每份材料 6000 字、合计 12000 字，见 `GUARDIANHUB_DOC_CONTENT_CHARS_*`），
 不是原文件；图片和压缩包提取不到正文时跳过内容判定，并提示转人工确认。字数和隐私检查仍在完整文本上运行。
 
+自检工具（对着**真模型**跑一次，验证提示词与真实返回对得上；单元测试注入的是固定返回，验不了这一层）：
+
+```powershell
+python tools/doc-intent-check.py --brief samples/doc-risky/requirement.txt --file samples/doc-risky/course-paper.txt
+```
+
+它只读本地文件与 `.env`，不写历史、不碰 API；未启用模型时打印回退路径并以 0 退出（这是受支持的结果），
+只有「模型答了但答案不可用」才返回 1。`--enable --base http://127.0.0.1:8099 --key x` 可指向本地桩服务联调。
+
 ## 联网分析失败时怎么定位
 
 `POST /api/detect` 的响应里有两个容易混淆的字段，区别是「给用户看的」和「给运维看的」：

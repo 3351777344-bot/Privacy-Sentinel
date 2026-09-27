@@ -22,6 +22,7 @@ from rate_limit import (
     ('/api/detect/', 'model'),
     ('/api/code/analyze', 'model'),
     ('/api/code/fix', 'model'),
+    ('/api/doc/check', 'model'),
     ('/static/uploads/x.png', None),
     ('/docs', None),
     ('/', None),

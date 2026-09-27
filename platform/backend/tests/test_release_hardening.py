@@ -11,15 +11,20 @@ import main
 from modules.doc_shield.signed_feed import install, verify
 
 
-@pytest.mark.parametrize('path,kwargs', [
-    ('/api/code/analyze', {'json': {'code': 'print(1)', 'processingMode': 'online'}}),
-    ('/api/detect', {'data': {'processing_mode': 'online'}, 'files': {'file': ('x.png', b'x', 'image/png')}}),
+@pytest.mark.parametrize('path,kwargs,forbidden_name', [
+    ('/api/code/analyze', {'json': {'code': 'print(1)', 'processingMode': 'online'}}, 'run_code_guardian'),
+    ('/api/detect', {'data': {'processing_mode': 'online'}, 'files': {'file': ('x.png', b'x', 'image/png')}}, 'detect_privacy_items'),
+    # Doc Shield spends model quota only in online mode, so the consent gate has
+    # to reject the request before the requirement parse is even reached.
+    ('/api/doc/check', {
+        'data': {'requirement_text': '请提交 PDF', 'processing_mode': 'online'},
+        'files': {'files': ('报告.txt', '正文'.encode('utf-8'), 'text/plain')},
+    }, '_run_online_doc_analysis'),
 ])
-def test_online_analysis_requires_explicit_consent(path, kwargs, monkeypatch):
+def test_online_analysis_requires_explicit_consent(path, kwargs, forbidden_name, monkeypatch):
     def forbidden(*args, **kw):
         pytest.fail('analysis ran without consent')
-    monkeypatch.setattr(main, 'detect_privacy_items', forbidden)
-    monkeypatch.setattr(main, 'run_code_guardian', forbidden)
+    monkeypatch.setattr(main, forbidden_name, forbidden)
     assert TestClient(main.app).post(path, **kwargs).status_code == 403
 
 

@@ -1,5 +1,7 @@
 param(
-  [string]$BaseUrl = 'http://127.0.0.1:8000'
+  [string]$BaseUrl = 'http://127.0.0.1:8000',
+  # Online Doc Shield spends model quota, so it is never part of the default run.
+  [switch]$OnlineDoc
 )
 
 $ErrorActionPreference = 'Stop'
@@ -68,6 +70,7 @@ $link = Invoke-RestMethod `
 
 $docArguments = @(
   '-sS', '-X', 'POST', "$BaseUrl/api/doc/check",
+  '--form-string', 'processing_mode=local',
   '--form-string',
   "requirement_text=$requirementText",
   '-F',
@@ -77,7 +80,25 @@ $doc = Invoke-CurlJson `
   -FailureMessage 'Doc Shield request failed.' `
   -Arguments $docArguments
 
-@(
+$onlineDoc = $null
+if ($OnlineDoc) {
+  # Consent header plus processing_mode=online: without the header the server
+  # answers 403 by design, so the flag has to set both to be a real check.
+  $onlineDocArguments = @(
+    '-sS', '-X', 'POST', "$BaseUrl/api/doc/check",
+    '-H', 'X-Guardian-Consent: explicit',
+    '--form-string', 'processing_mode=online',
+    '--form-string',
+    "requirement_text=$requirementText",
+    '-F',
+    "files=@$document;type=text/plain"
+  )
+  $onlineDoc = Invoke-CurlJson `
+    -FailureMessage 'Doc Shield online request failed.' `
+    -Arguments $onlineDocArguments
+}
+
+$rows = @(
   [pscustomobject]@{
     Module = 'health'
     Result = $health.status
@@ -112,6 +133,19 @@ $doc = Invoke-CurlJson `
     Module = 'doc'
     Result = $doc.riskLevel
     Score = $doc.score
-    Details = "checks=$($doc.checks.Count)"
+    Details = "checks=$($doc.checks.Count), source=$($doc.parsedRequirements.source)"
   }
-) | Format-Table -AutoSize
+)
+
+if ($OnlineDoc) {
+  $rows += [pscustomobject]@{
+    Module = 'doc-online'
+    Result = $onlineDoc.riskLevel
+    Score = $onlineDoc.score
+    Details = "source=$($onlineDoc.parsedRequirements.source), " +
+      "content=$($onlineDoc.parsedRequirements.contentRequirements.Count), " +
+      "warning=$($onlineDoc.parsedRequirements.modelWarning)"
+  }
+}
+
+$rows | Format-Table -AutoSize

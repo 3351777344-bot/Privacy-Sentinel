@@ -29,8 +29,14 @@ from starlette.responses import JSONResponse
 
 # Endpoints that may spend paid upstream model quota. Kept in sync with the
 # places that construct an OpenAI client: /api/code/fix does it inline, while
-# /api/detect and /api/code/analyze reach it through their detectors.
-MODEL_PATHS = frozenset({"/api/detect", "/api/code/analyze", "/api/code/fix"})
+# /api/detect, /api/code/analyze and /api/doc/check reach it through their
+# detectors.
+#
+# /api/doc/check only spends quota when the request asks for online mode, but the
+# budget is chosen from the path alone — the mode lives inside a multipart body
+# this middleware must not consume. Charging both modes to the model budget is
+# the deliberate cost of keeping the limiter a pure ASGI wrapper.
+MODEL_PATHS = frozenset({"/api/detect", "/api/code/analyze", "/api/code/fix", "/api/doc/check"})
 
 RATE_LIMITED_DETAIL = "请求过于频繁，请稍后重试。"
 
