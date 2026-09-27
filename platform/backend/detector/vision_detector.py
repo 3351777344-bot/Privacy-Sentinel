@@ -220,19 +220,36 @@ def _call_deepseek_vision(image_path: str) -> list[dict]:
             ],
             "max_tokens": _vision_max_tokens(),
             "temperature": 0.1,
-            "response_format": {"type": "json_object"},
         }
+        # No response_format here on purpose: the prompt already demands JSON and
+        # _extract_json_payload tolerates markdown fences. Sending JSON mode with an
+        # image part is rejected by some OpenAI-compatible providers, and a direct
+        # curl call to DeepSeek (without it) reads the image correctly.
 
         response = client.chat.completions.create(**request)
         content = response.choices[0].message.content
         payload = _extract_json_payload(content or "")
         if payload is None:
+            logger.warning(
+                "DeepSeek vision returned unparseable content (first 200 chars): %r",
+                (content or "")[:200],
+            )
             return []
         if isinstance(payload, dict):
             return payload.get("items", [])
         return []
     except Exception as exc:
-        logger.error("DeepSeek vision API call failed: %s", exc)
+        # Include the exception type and any HTTP status/body so a provider-side
+        # rejection is diagnosable from the service log alone.
+        status = getattr(exc, "status_code", None)
+        body = getattr(exc, "response", None)
+        detail = ""
+        if body is not None:
+            detail = f" body={str(getattr(body, 'text', body))[:300]}"
+        logger.error(
+            "DeepSeek vision API call failed: %s: %s (status=%s)%s",
+            type(exc).__name__, exc, status, detail,
+        )
         return []
 
 
@@ -362,14 +379,18 @@ Verify OCR hits, add missed risks only. Empty arrays if nothing new. JSON only."
             ],
             "max_tokens": _vision_max_tokens(),
             "temperature": 0.1,
-            "response_format": {"type": "json_object"},
         }
+        # See _call_deepseek_vision: JSON mode is omitted because some
+        # OpenAI-compatible providers reject it alongside an image part.
 
         response = client.chat.completions.create(**request)
         content = response.choices[0].message.content
         payload = _extract_json_payload(content or "")
         if payload is None:
-            logger.error("Failed to parse hybrid DeepSeek vision response: empty or invalid JSON")
+            logger.error(
+                "Failed to parse hybrid DeepSeek vision response (first 200 chars): %r",
+                (content or "")[:200],
+            )
             return local_items
 
         if not isinstance(payload, dict):
