@@ -90,7 +90,7 @@ struct Index {
               .width('100%')
 
             Row() {
-              Text('本地优先')
+              Text('仅本地')
                 .fontSize(11)
                 .fontColor('#FFFFFF')
               Text('联网可选')

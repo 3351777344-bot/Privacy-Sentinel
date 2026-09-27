@@ -75,7 +75,7 @@ struct DocPage {
   /** Opt-in: allow a hash-only reputation lookup for suspicious files. */
   @State cloudAssist: boolean = false;
   @State cloudNote: string = '';
-  @State mode: ProcessingMode = 'hybrid';
+  @State mode: ProcessingMode = 'local_only';
   @State resultMeta: string = '尚未检测';
   @State complete: boolean = false;
   /** Pending debounced write of the brief; `-1` when idle. */
@@ -188,7 +188,7 @@ struct DocPage {
     }
   }
 
-  private async scan(enhance: boolean = false): Promise<void> {
+  private async scan(): Promise<void> {
     if (this.requirementText.trim().length === 0) {
       this.statusMessage = '请先填写提交要求';
       return;
@@ -219,7 +219,7 @@ struct DocPage {
       let backendParseEcho: string = '';
       let backendReachable: boolean = false;
       try {
-        if (ScanPolicy.shouldEnhance(mode, enhance)) {
+        if (ScanPolicy.shouldEnhance(mode)) {
         const report: DocCheckResponse = await GuardianApi.checkDocuments(
           brief,
           uris,
@@ -444,12 +444,6 @@ struct DocPage {
 
             ProcessingModeSelector({ mode: this.mode, disabled: this.scanning,
               onModeChange: (value: ProcessingMode) => { this.mode = value; } })
-
-            if (this.mode !== 'local_only') {
-              Button('增强分析 · 本次授权后上传所选非压缩材料')
-                .enabled(!this.scanning)
-                .onClick(() => { this.scan(true); })
-            }
 
             Button(this.scanning ? '检查中…' : '开始提交前检查')
               .enabled(!this.scanning)

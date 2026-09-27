@@ -1,6 +1,6 @@
 import { Finding, RiskLevel } from '../models/SecurityModels';
 
-export type ProcessingMode = 'local_only' | 'hybrid' | 'online';
+export type ProcessingMode = 'local_only' | 'online';
 export type TransferState = 'not_sent' | 'awaiting_consent' | 'rejected' | 'sending' | 'sent' | 'failed';
 export type Verdict = 'safe' | 'low' | 'medium' | 'high' | 'blocked' | 'unknown';
 
@@ -8,10 +8,13 @@ export type Verdict = 'safe' | 'low' | 'medium' | 'high' | 'blocked' | 'unknown'
 export class TransferSession {
   mode: ProcessingMode;
   state: TransferState = 'not_sent';
-  constructor(mode: ProcessingMode = 'hybrid') { this.mode = mode; }
+  constructor(mode: ProcessingMode = 'local_only') { this.mode = mode; }
 
   async run<T>(consent: () => Promise<void>, send: () => Promise<T>): Promise<T> {
     if (this.mode === 'local_only') { throw new Error('仅本地模式禁止联网，请切换处理模式。'); }
+    // A module operation may need several related requests (for example, one
+    // check per URL extracted from the same QR image). Reuse its first consent.
+    if (this.state === 'sent') { return this.runFollowUp<T>(send); }
     if (this.state !== 'not_sent') { throw new Error('本次请求已处理；再次分析需重新授权。'); }
     this.state = 'awaiting_consent';
     try { await consent(); } catch (_) {
@@ -34,6 +37,23 @@ export class TransferSession {
     }
   }
 
+  /** Send a related request in the same operation under its existing consent. */
+  async runFollowUp<T>(send: () => Promise<T>): Promise<T> {
+    if (this.mode === 'local_only') { throw new Error('仅本地模式禁止联网，请切换处理方式。'); }
+    if (this.state !== 'sent') { throw new Error('请先完成本次联网授权。'); }
+    this.state = 'sending';
+    try {
+      const result: T = await send();
+      this.state = 'sent';
+      return result;
+    } catch (error) {
+      this.state = 'failed';
+      const typedError = error as Error;
+      const reason: string = typedError.message ? typedError.message : '未知错误';
+      throw new Error(`已尝试发送，服务器可能已收到数据；结果未完成，未自动重试。原因：${reason}`);
+    }
+  }
+
   describe(): string {
     switch (this.state) {
       case 'awaiting_consent': return '等待本次联网授权 · 尚未发送';
@@ -41,14 +61,14 @@ export class TransferSession {
       case 'sending': return '已授权 · 正在发送';
       case 'sent': return '已授权发送 · 已收到远程结果';
       case 'failed': return '已尝试发送 · 数据可能已到达服务器 · 未自动重试';
-      default: return this.mode === 'local_only' ? '仅本地 · 未发送' : '本地检测完成 · 未发送 · 可主动增强';
+      default: return this.mode === 'local_only' ? '仅本地 · 未发送' : '等待联网授权 · 未发送';
     }
   }
 }
 
 export class ScanPolicy {
-  static shouldEnhance(mode: ProcessingMode, clicked: boolean): boolean {
-    return mode !== 'local_only' && (mode === 'online' || clicked);
+  static shouldEnhance(mode: ProcessingMode): boolean {
+    return mode === 'online';
   }
 
   static risk(findings: Finding[]): RiskLevel {

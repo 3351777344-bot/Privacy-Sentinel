@@ -14,9 +14,6 @@ export { API_BASE_URL } from './ApiConfig';
  * already-uploaded image, then fetch the result). They share a single consent
  * text so the user approves the whole operation once, not once per request.
  */
-const MASK_DISCLOSURE =
-  '发送图片记录编号与遮挡方式，并取回服务端生成的脱敏图；不重新上传原图。';
-
 /** Result of one masking operation: the server record plus the masked image bytes. */
 export interface MaskedImageResult {
   response: PrivacyProcessResponse;
@@ -27,10 +24,10 @@ export class GuardianApi {
   private static async dispatch(path: string, options: http.HttpRequestOptions): Promise<Object> {
     const request = http.createHttp();
     try {
-      const headers = options.header as Record<string, string>;
+      const headers = (options.header ?? {}) as Record<string, string>;
       headers['X-Guardian-Consent'] = 'explicit';
       options.header = headers;
-      options.expectDataType = http.HttpDataType.STRING;
+      options.expectDataType = options.expectDataType ?? http.HttpDataType.STRING;
       options.connectTimeout = 15000;
       // The server may spend up to its own 60s model timeout and then still
       // answer with a usable fallback, so the client must wait longer than that;
@@ -83,14 +80,14 @@ export class GuardianApi {
     transfer: TransferSession, disclosure: string,
     decode: (result: Object) => T = (result: Object): T => JSON.parse(result as string) as T): Promise<T> {
     return transfer.run<T>(
-      async (): Promise<void> => { await NetworkConsent.require(`${disclosure}\n目的地址：${API_BASE_URL}`); },
+      async (): Promise<void> => { await NetworkConsent.require(disclosure); },
       (): Promise<T> => GuardianApi.dispatch(path, options).then((result: Object): T => decode(result))
     );
   }
 
   static analyzeCodeText(code: string, language: string,
-    mode: ProcessingMode = 'hybrid', transfer: TransferSession = new TransferSession(mode),
-    disclosure: string = '发送输入代码文本用于增强分析，可能包含凭据，请先移除。'): Promise<CodeAnalyzeResponse> {
+    mode: ProcessingMode = 'local_only', transfer: TransferSession = new TransferSession(mode),
+    disclosure: string = '将你填写的代码片段发送到在线服务进行安全分析。请先删除代码中的密码、密钥和个人信息。'): Promise<CodeAnalyzeResponse> {
     return GuardianApi.send<CodeAnalyzeResponse>('/api/code/analyze', {
       method: http.RequestMethod.POST, header: { 'Content-Type': 'application/json' },
       extraData: JSON.stringify({ language: language, code: code, processingMode: 'online' })
@@ -98,13 +95,13 @@ export class GuardianApi {
   }
 
   static async analyzeCodeArchive(uri: string, name: string,
-    mode: ProcessingMode = 'hybrid', transfer: TransferSession = new TransferSession(mode)): Promise<CodeAnalyzeResponse> {
+    mode: ProcessingMode = 'local_only', transfer: TransferSession = new TransferSession(mode)): Promise<CodeAnalyzeResponse> {
     const bytes = new Uint8Array(await GuardianApi.readSelectedFile(uri, 10 * 1024 * 1024));
     const report = ThreatScanner.scanFile(name, bytes);
     const preview = ArchiveReview.inspect(bytes, report);
     if (!preview.canEnhance) { throw new Error('压缩包结构无效或条目过多，仅保留本地结果。'); }
     return GuardianApi.analyzeCodeText(preview.summary, 'auto', mode, transfer,
-      ArchiveReview.describe(preview) + '\n模型仅解释静态摘要，不会进行源码审计。');
+      `将发送项目包的本地检查摘要（${preview.fileCount} 个文件），不发送 ZIP 原文件或源代码。在线分析只解释检查摘要，不会运行项目代码。`);
   }
 
   static checkLink(url: string, source: string,
@@ -112,7 +109,7 @@ export class GuardianApi {
     return GuardianApi.send<LinkCheckResponse>('/api/link/check', {
       method: http.RequestMethod.POST, header: { 'Content-Type': 'application/json' },
       extraData: JSON.stringify({ url: url, source: source })
-    }, transfer, '发送完整链接及来源文本用于静态增强检查；链接参数可能包含私人信息。');
+    }, transfer, '将完整链接（包括链接参数）和你填写的来源信息发送到在线服务，检查可疑链接。链接参数可能包含个人信息，请先确认。');
   }
 
   static async checkDocuments(requirement: string, uris: string[], names: string[],
@@ -131,10 +128,10 @@ export class GuardianApi {
     }
     return GuardianApi.send<DocCheckResponse>('/api/doc/check', {
       method: http.RequestMethod.POST, header: { 'Content-Type': 'multipart/form-data' }, multiFormDataList: form
-    }, transfer, `发送 ${uris.length} 个原始文档、文件名和提交要求，共 ${bytes} 字节。`);
+    }, transfer, `将你选择的 ${uris.length} 份材料、文件名和填写的提交要求发送到在线服务，进行安全分析。`);
   }
 
-  static async detectPrivacy(uri: string, name: string, mode: ProcessingMode = 'hybrid',
+  static async detectPrivacy(uri: string, name: string, mode: ProcessingMode = 'local_only',
     transfer: TransferSession = new TransferSession(mode)): Promise<DetectResponse> {
     const data = await GuardianApi.readSelectedFile(uri, 10 * 1024 * 1024);
     return GuardianApi.send<DetectResponse>('/api/detect', {
@@ -143,7 +140,7 @@ export class GuardianApi {
         { name: 'processing_mode', contentType: 'text/plain', data: 'online' },
         { name: 'file', contentType: GuardianApi.imageContentType(name), remoteFileName: 'image' + name.substring(name.lastIndexOf('.')), data: data }
       ]
-    }, transfer, `发送原图用于文字与内容识别，共 ${data.byteLength} 字节。文字和人物等内容也会一并上传。`);
+    }, transfer, '将原始图片发送到在线服务，检查图片中的文字和隐私信息。生成遮挡图片时，还会发送图片编号和遮挡方式，并取回处理后的图片。');
   }
 
   /**
@@ -154,10 +151,7 @@ export class GuardianApi {
    */
   static async processAndDownloadImage(imageId: string, maskType: string, mode: ProcessingMode,
     transfer: TransferSession = new TransferSession(mode)): Promise<MaskedImageResult> {
-    return transfer.run<MaskedImageResult>(
-      async (): Promise<void> => {
-        await NetworkConsent.require(`${MASK_DISCLOSURE}\n目的地址：${API_BASE_URL}`);
-      },
+    return transfer.runFollowUp<MaskedImageResult>(
       async (): Promise<MaskedImageResult> => {
         const processed = await GuardianApi.dispatch('/api/privacy/process', {
           method: http.RequestMethod.POST, header: { 'Content-Type': 'application/json' },
@@ -165,8 +159,12 @@ export class GuardianApi {
         });
         const response = JSON.parse(processed as string) as PrivacyProcessResponse;
         const image = await GuardianApi.dispatch(response.processedImageUrl, {
-          method: http.RequestMethod.GET
+          method: http.RequestMethod.GET,
+          expectDataType: http.HttpDataType.ARRAY_BUFFER
         });
+        if (!(image instanceof ArrayBuffer) || image.byteLength === 0) {
+          throw new Error('服务端未返回有效的处理图，请重新生成安全预览。');
+        }
         const result: MaskedImageResult = { response: response, image: image as ArrayBuffer };
         return result;
       }

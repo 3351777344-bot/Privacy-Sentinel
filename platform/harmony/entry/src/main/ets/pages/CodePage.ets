@@ -27,8 +27,8 @@ struct CodePage {
   @State archiveStatus: string = '尚未选择项目包';
   @State scanningArchive: boolean = false;
   @State scanningSnippet: boolean = false;
-  @State snippetStatus: string = '默认端侧扫描，不上传；选择增强分析后仍需授权本次发送。';
-  @State processingMode: ProcessingMode = 'hybrid';
+  @State snippetStatus: string = '默认端侧扫描，不上传；联网模式会发送代码片段进行增强分析。';
+  @State processingMode: ProcessingMode = 'local_only';
 
   @State resultMeta: string = '尚未检测';
   @State completed: boolean = false;
@@ -60,7 +60,7 @@ struct CodePage {
     });
   }
 
-  private async scan(enhance: boolean = false): Promise<void> {
+  private async scan(): Promise<void> {
     if (this.scanningSnippet || this.scanningArchive) { return; }
     const code = this.codeText;
     if (!code.trim()) { this.snippetStatus = '请先输入代码'; return; }
@@ -74,7 +74,7 @@ struct CodePage {
       this.completed = true;
       this.snippetStatus = '端侧规则检测完成；不覆盖完整语义与依赖漏洞。';
       await this.saveLocal('代码片段', this.snippetStatus + ' 未发送。');
-      if (ScanPolicy.shouldEnhance(mode, enhance)) {
+      if (ScanPolicy.shouldEnhance(mode)) {
         try {
           const report = await GuardianApi.analyzeCodeText(code, 'auto', mode, transfer);
           this.findings = local.findings.concat(this.mapVulnerabilities(report));
@@ -109,7 +109,7 @@ struct CodePage {
     }
   }
 
-  private async scanArchive(enhance: boolean = false): Promise<void> {
+  private async scanArchive(): Promise<void> {
     if (this.scanningArchive || this.scanningSnippet) { return; }
     if (!this.archiveUri) { this.archiveStatus = '请先选择ZIP'; return; }
     const uri = this.archiveUri;
@@ -130,7 +130,7 @@ struct CodePage {
       this.completed = true;
       this.archiveStatus = 'ZIP端侧扫描完成，原包未发送。';
       await this.saveLocal('ZIP项目包', this.archiveStatus);
-      if (ScanPolicy.shouldEnhance(mode, enhance)) {
+      if (ScanPolicy.shouldEnhance(mode)) {
         if (!preview.canEnhance) { this.archiveStatus += ' 结构无效或条目超限，禁止增强。'; }
         else {
           try {
@@ -203,9 +203,6 @@ struct CodePage {
                   this.codeText = value;
                 })
 
-              Button('增强当前代码 需授权')
-                .enabled(this.processingMode !== 'local_only' && !this.scanningSnippet && !this.scanningArchive)
-                .onClick(() => { this.scan(true); })
               Text(this.snippetStatus)
                 .fontSize(12)
                 .fontColor('#64748B')
@@ -258,9 +255,6 @@ struct CodePage {
               }
 
               Text(this.archivePreview).fontSize(12).fontColor('#475569').margin({ top: 10 })
-              Button('增强ZIP摘要 不上传原包')
-                .enabled(this.processingMode !== 'local_only' && !this.scanningArchive && !this.scanningSnippet)
-                .onClick(() => { this.scanArchive(true); })
               Text(this.archiveStatus)
                 .fontSize(12)
                 .fontColor('#64748B')

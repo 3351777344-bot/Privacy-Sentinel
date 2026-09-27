@@ -72,7 +72,7 @@ export class ReputationClient {
 
     const request = http.createHttp();
     try {
-      await NetworkConsent.require('仅发送文件 SHA256 与本地风险等级，不发送原文、文件名或 URL 参数。');
+      await NetworkConsent.require('只发送文件的数字指纹和本机风险等级，用于查询是否存在已知风险；不会发送文件内容、文件名或链接中的个人信息。');
       const response = await request.request(`${API_BASE_URL}/api/doc/reputation`, {
         method: http.RequestMethod.POST,
         header: { 'Content-Type': 'application/json', 'X-Guardian-Consent': 'explicit' },

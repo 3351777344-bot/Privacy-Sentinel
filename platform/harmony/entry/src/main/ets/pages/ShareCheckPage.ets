@@ -23,7 +23,7 @@ import { QrImageReport, QrRules } from '../services/QrRules';
 import { ShareOutService } from '../services/ShareOutService';
 import { SignatureDB } from '../services/SignatureDB';
 import { ThreatScanner } from '../services/ThreatScanner';
-import { ProcessingMode, ScanPolicy } from '../services/ScanPolicy';
+import { ProcessingMode, ScanPolicy, TransferSession } from '../services/ScanPolicy';
 import { SHARE_INTENT_KEY, ShareIntent } from '../shareability/ShareCheckAbility';
 
 type GateRoute = 'image' | 'doc' | 'link' | 'code' | 'unknown';
@@ -66,9 +66,10 @@ struct ShareCheckPage {
    * on-device rule engine, so the report can stop claiming a full check.
    */
   @State fallbackReason: string = '';
-  @State mode: ProcessingMode = 'hybrid';
+  @State mode: ProcessingMode = 'local_only';
   private gateGeneration: number = 0;
   private qrReport: QrImageReport = QrRules.analyze([]);
+  private imageTransfer: TransferSession = new TransferSession('local_only');
 
   private abilityContext(): common.UIAbilityContext {
     return this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -256,6 +257,9 @@ struct ShareCheckPage {
   private async runImageRoute(imageUri: string, enhance: boolean = false): Promise<void> {
     this.sourceUri = imageUri;
     this.sourceLabel = '分享图片';
+    if (enhance) {
+      this.imageTransfer = new TransferSession(this.mode);
+    }
     const qr: QrImageReport = await QrContentService.decodeAll(imageUri);
     this.qrReport = qr;
     this.findings = qr.findings;
@@ -267,7 +271,7 @@ struct ShareCheckPage {
       this.summary += ' 当前为仅本地模式，未发送原图。';
     } else if (enhance && !qr.uploadBlocked) {
       try {
-        const report = await GuardianApi.detectPrivacy(imageUri, 'shared-image.jpg', this.mode);
+        const report = await GuardianApi.detectPrivacy(imageUri, 'shared-image.jpg', this.mode, this.imageTransfer);
         this.imageId = report.imageId;
         this.findings = this.findings.concat(report.items.map((item: PrivacyItem): Finding => {
           return { title: item.label, evidence: item.text, suggestion: item.suggestion, riskLevel: item.riskLevel };
@@ -328,7 +332,7 @@ struct ShareCheckPage {
         throw new Error('当前仅完成二维码检测；未获得可处理的联网文字识别结果。');
       }
       const masked = await GuardianApi.processAndDownloadImage(
-        this.imageId, this.maskMode, this.mode);
+        this.imageId, this.maskMode, this.mode, this.imageTransfer);
       this.processedImageUri =
         await ProcessedImageService.cache(this.abilityContext(), masked.image);
       this.processed = true;
@@ -699,12 +703,15 @@ struct ShareCheckPage {
 
           ProcessingModeSelector({ mode: this.mode,
             disabled: this.phase === 'analyzing' || this.phase === 'processing',
-            onModeChange: (value: ProcessingMode) => { this.mode = value; } })
+            onModeChange: (value: ProcessingMode) => {
+              this.mode = value;
+              if (value === 'online' && this.route === 'image' &&
+                this.sourceUri.length > 0 && this.phase === 'report') {
+                this.runImageRoute(this.sourceUri, true);
+              }
+            } })
 
           if (this.route === 'image' && this.sourceUri.length > 0 && this.phase === 'report') {
-            Button('增强分析 原图将上传')
-              .enabled(this.mode !== 'local_only')
-              .onClick(() => { this.runImageRoute(this.sourceUri, true); })
             Image(this.sourceUri)
               .width('100%')
               .height(200)
@@ -718,7 +725,7 @@ struct ShareCheckPage {
             findings: this.findings,
             score: this.score,
             verdict: ScanPolicy.verdict(this.findings, this.phase === 'report', this.phase === 'offline'),
-            contextCopy: '来源：端侧分享拦截；联网增强每次单独授权。',
+            contextCopy: '来源：端侧分享拦截；联网分析可能会将内容发送至服务端。',
             emptyCopy: this.summary
           })
           .margin({ top: 12 })

@@ -16,7 +16,7 @@ assert.equal(consent, 0);
 assert.equal(sent, 0);
 assert.equal(local.state, 'not_sent');
 
-const rejected = new TransferSession('hybrid');
+const rejected = new TransferSession('online');
 await assert.rejects(rejected.run(async () => { consent++; throw new Error('reject'); }, async () => { sent++; return 1; }));
 assert.equal(rejected.state, 'rejected');
 assert.equal(sent, 0);
@@ -28,10 +28,17 @@ assert.equal(sent, 1);
 assert.match(failed.describe(), /可能已到达/);
 await assert.rejects(failed.run(async () => {}, async () => 1), /重新授权/);
 
-const ok = new TransferSession('hybrid');
+const ok = new TransferSession('online');
 assert.equal(await ok.run(async () => { consent++; }, async () => { sent++; return 7; }), 7);
 assert.equal(ok.state, 'sent');
 assert.equal(sent, 2);
+
+const grouped = new TransferSession('online');
+let groupedConsent = 0;
+assert.equal(await grouped.run(async () => { groupedConsent++; }, async () => 'first'), 'first');
+assert.equal(await grouped.run(async () => { groupedConsent++; }, async () => 'follow-up'), 'follow-up');
+assert.equal(groupedConsent, 1);
+assert.equal(grouped.state, 'sent');
 
 const raw = 'https://example.com/login?token=secret123&next=%2Fpay';
 const qr = QrRules.analyze([
@@ -96,4 +103,4 @@ assert.ok(shareSource.includes('for (let index = 0; index < total; index++)'));
 assert.ok(!shareSource.includes('decodeImage'));
 assert.ok(!readSource('pages/DocPage.ets').includes('if (!enhance)'));
 assert.ok(readSource('pages/LinkPage.ets').includes('private rawQrUrls: string[]'));
-console.log('Harmony privacy contracts: 40 assertions passed.');
+console.log('Harmony privacy contracts: 44 assertions passed.');

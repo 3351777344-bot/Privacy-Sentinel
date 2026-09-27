@@ -23,7 +23,7 @@ struct LinkPage {
   @State resultMeta: string = '尚未检测';
   @State scanning: boolean = false;
   @State complete: boolean = false;
-  @State mode: ProcessingMode = 'hybrid';
+  @State mode: ProcessingMode = 'local_only';
   private rawQrUrls: string[] = [];
   private qrFindings: Finding[] = [];
   private qrBlocked: boolean = false;
@@ -40,7 +40,7 @@ struct LinkPage {
     });
   }
 
-  private async scan(enhance: boolean = false): Promise<void> {
+  private async scan(): Promise<void> {
     const targets: string[] = this.qrFindings.length > 0 ? this.rawQrUrls.slice() : [this.urlText.trim()];
     if (this.qrFindings.length === 0 && (targets.length === 0 || targets[0].length === 0)) {
       this.statusMessage = '请先输入链接或解析二维码'; return;
@@ -60,11 +60,10 @@ struct LinkPage {
       '二维码载荷已在端侧分类；其中没有可执行链接检查的 URL。';
     await this.saveHistory(this.statusMessage);
     try {
-      if (ScanPolicy.shouldEnhance(mode, enhance) && !this.qrBlocked && targets.length > 0) {
+      if (ScanPolicy.shouldEnhance(mode) && !this.qrBlocked && targets.length > 0) {
         const remote: Finding[] = [];
         for (let index = 0; index < targets.length; index++) {
-          const session = index === 0 ? transfer : new TransferSession(mode);
-          const report: LinkCheckResponse = await GuardianApi.checkLink(targets[index], this.sourceText, session);
+          const report: LinkCheckResponse = await GuardianApi.checkLink(targets[index], this.sourceText, transfer);
           report.checks.forEach((item: LinkCheckItem) => remote.push({
             title: item.label, evidence: item.message,
             suggestion: report.suggestions.length > 0 ? report.suggestions[0] : '打开前再次核对域名。',
@@ -75,7 +74,7 @@ struct LinkPage {
         this.score = ScanPolicy.score(this.findings);
         this.statusMessage += ' 联网增强完成。';
         await this.saveHistory(this.statusMessage);
-      } else if (this.qrBlocked && enhance) {
+      } else if (this.qrBlocked && mode === 'online') {
         this.statusMessage += ' 二维码含敏感载荷或解析失败，已阻止上传。';
       }
     } catch (error) {
@@ -124,25 +123,29 @@ struct LinkPage {
       Scroll() {
         Column() {
           SectionCard({ title: '01 输入链接与来源', copy: '二维码完整载荷仅在内存中参与端侧分析；界面与历史只保存脱敏内容。' }) {
-            TextArea({ text: this.urlText, placeholder: 'https://example.com/path' })
-              .height(105).fontSize(13).backgroundColor('#F8FAFC').borderRadius(12).padding(11).enabled(!this.scanning)
-              .onChange((value: string) => {
-                this.urlText = value; this.rawQrUrls = []; this.qrFindings = []; this.qrBlocked = false;
-              })
+            Stack({ alignContent: Alignment.BottomEnd }) {
+              TextArea({ text: this.urlText, placeholder: 'https://example.com/path' })
+                .height(105).fontSize(13).backgroundColor('#F8FAFC').borderRadius(12)
+                .padding({ left: 11, right: 11, top: 11, bottom: 48 }).enabled(!this.scanning)
+                .onChange((value: string) => {
+                  this.urlText = value; this.rawQrUrls = []; this.qrFindings = []; this.qrBlocked = false;
+                })
+              Button('上传二维码')
+                .height(34).fontSize(12).fontColor('#0F766E')
+                .backgroundColor('#CCFBF1').borderRadius(10)
+                .margin({ right: 8, bottom: 8 }).enabled(!this.scanning)
+                .onClick(() => { this.pickQrImage(); })
+            }.width('100%')
             TextInput({ text: this.sourceText, placeholder: '例如：学校官网、短信、群聊' })
               .height(44).fontSize(13).backgroundColor('#F8FAFC').borderRadius(12).margin({ top: 10 }).enabled(!this.scanning)
               .onChange((value: string) => { this.sourceText = value; })
-            Button('从相册解析全部二维码').width('100%').height(42).fontSize(13).fontColor('#0F766E')
-              .backgroundColor('#CCFBF1').borderRadius(12).margin({ top: 12 }).enabled(!this.scanning)
-              .onClick(() => { this.pickQrImage(); })
             ProcessingModeSelector({ mode: this.mode, disabled: this.scanning,
               onModeChange: (value: ProcessingMode) => { this.mode = value; } })
-            Button(this.scanning ? '检测中…' : '执行端侧检测').width('100%').height(46).margin({ top: 10 })
-              .enabled(!this.scanning).onClick(() => { this.scan(false); })
-            if (this.mode !== 'local_only') {
-              Button('增强分析 · 本次授权').width('100%').height(42).margin({ top: 8 })
-                .enabled(!this.scanning && !this.qrBlocked).onClick(() => { this.scan(true); })
-            }
+            Button(this.scanning ? '检查中…' :
+              (this.mode === 'online' ? '开始联网链接检测' : '开始本地链接检测'))
+              .width('100%').height(46).margin({ top: 10 })
+              .enabled(!this.scanning && (this.mode === 'local_only' || !this.qrBlocked))
+              .onClick(() => { this.scan(); })
             Text(this.statusMessage).fontSize(12).fontColor('#64748B').lineHeight(19).margin({ top: 9 }).width('100%')
           }
           ResultPanel({ findings: this.findings, score: this.score,

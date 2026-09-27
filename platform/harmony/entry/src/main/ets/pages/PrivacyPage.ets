@@ -29,7 +29,8 @@ struct PrivacyPage {
   @State historyRecordId: string = '';
   @State statusMessage: string = '尚未选择图片';
   @State scanning: boolean = false;
-  @State processingMode: ProcessingMode = 'hybrid';
+  @State processingMode: ProcessingMode = 'online';
+  private imageTransfer: TransferSession = new TransferSession('online');
 
   private qrReport: QrImageReport = QrRules.analyze([]);
   @State localComplete: boolean = false;
@@ -72,10 +73,11 @@ struct PrivacyPage {
     }
   }
 
-  private async detectSelectedImage(imageUri: string, imageName: string, enhance: boolean = false): Promise<void> {
+  private async detectSelectedImage(imageUri: string, imageName: string): Promise<void> {
     if (this.scanning) { return; }
     const mode = this.processingMode;
     const transfer = new TransferSession(mode);
+    this.imageTransfer = transfer;
     this.imageUri = imageUri;
     this.imageName = imageName;
     this.hasImage = true;
@@ -96,16 +98,11 @@ struct PrivacyPage {
         score: this.score, summary: this.statusMessage + ' ' + this.resultMeta,
         sourceLabel: '本地图片', findings: this.findings, suggestions: ['遮挡二维码后仍需检查文字与人物。']
       });
-      if (ScanPolicy.shouldEnhance(mode, enhance)) {
-        if (this.qrReport.uploadBlocked && this.qrReport.status !== 'failed') {
-          // Only a *decoded* sensitive code blocks the upload. A decode failure
-          // is not evidence of a payment code, so it must not silently disable
-          // the whole enhancement path (the file picker cannot always be read
-          // by Scan Kit, which made this a dead end).
-          this.statusMessage += ' 原图增强已阻断，可使用端侧黑块遮挡。';
-          await this.showNotice('原图增强已阻断',
-            '图中二维码属于收款码或付款码一类凭据，为避免泄露，原图不会上传。'
-            + '可在下方用端侧黑块遮挡二维码后再分享。');
+      if (mode === 'online') {
+        if (this.qrReport.uploadBlocked) {
+          this.statusMessage += ' 图片中的二维码无法确认安全，原图未上传。';
+          await this.showNotice('联网分析已阻止',
+            '检测到敏感二维码或无法可靠解析二维码。为保护图片内容，未上传原图；可移除二维码后重新选择图片。');
         } else {
           try {
             const report = await GuardianApi.detectPrivacy(imageUri, imageName, mode, transfer);
@@ -159,7 +156,7 @@ struct PrivacyPage {
         this.processedImageUri = await ProcessedImageService.maskLocal(this.abilityContext(), this.imageUri, this.qrReport);
         this.statusMessage = '已在端侧用不透明黑块遮挡全部二维码，未上传。文字和人物未遮挡，请放大复核。';
       } else if (this.imageId.length > 0 && this.processingMode !== 'local_only') {
-        const transfer = new TransferSession(this.processingMode);
+        const transfer = this.imageTransfer;
         try {
           const masked = await GuardianApi.processAndDownloadImage(
             this.imageId, this.maskMode, this.processingMode, transfer);
@@ -167,12 +164,9 @@ struct PrivacyPage {
           this.statusMessage = '远程处理完成，请复核遮挡范围。';
         } finally { this.resultMeta = '远程遮挡 · ' + transfer.describe(); }
       } else {
-        // Say what the user can actually do: hybrid mode needs one enhancement
-        // pass first, because the mask needs either QR coordinates or the
-        // server-side item boxes.
         throw new Error(this.processingMode === 'local_only'
-          ? '仅本地模式只能遮挡二维码；切换到本地优先或联网分析并执行一次增强后，可遮挡文字与人物。'
-          : '尚未执行增强分析：请先点上方「增强分析 需本次授权」，得到隐私区域后再生成安全预览。');
+          ? '仅本地模式只能遮挡二维码；切换到联网分析并重新选择图片后，可检测并遮挡文字与人物。'
+          : '请重新选择图片并完成联网授权，再生成安全预览。');
       }
       this.processed = true;
       await HistoryStore.updateProcessed(this.abilityContext(), this.historyRecordId, this.statusMessage);
@@ -273,12 +267,12 @@ struct PrivacyPage {
         Column() {
           SectionCard({
             title: '01 选择图片',
-            copy: '默认端侧二维码检查，不上传。文字识别需选择联网增强并授权；敏感二维码原图不上传。'
+            copy: '联网分析会检查图片中的文字；检测到敏感或无法确认安全的二维码时，原图不会上传。'
           }) {
             ProcessingModeSelector({
               mode: this.processingMode,
               disabled: this.scanning,
-              onlineHint: 'DeepSeek 增强识别',
+              onlineHint: '联网分析会识别图片中的文字；符合安全条件时，原图会发送至服务端。',
               onModeChange: (mode: ProcessingMode) => {
                 this.processingMode = mode;
               }
@@ -310,9 +304,6 @@ struct PrivacyPage {
                 this.pickFromAlbum();
               })
 
-            Button('增强分析 需本次授权')
-              .enabled(this.hasImage && !this.scanning && this.processingMode !== 'local_only')
-              .onClick(() => { this.detectSelectedImage(this.imageUri, this.imageName, true); })
 
             if (this.hasImage) {
               Row() {
@@ -345,7 +336,7 @@ struct PrivacyPage {
             score: this.score,
             contextCopy: this.resultMeta,
             verdict: ScanPolicy.verdict(this.findings, this.localComplete, this.qrReport.uploadBlocked),
-            emptyCopy: '选择图片后执行端侧二维码检测；文字识别与人物检测需本次授权增强。'
+            emptyCopy: '联网分析会识别图片中的文字；仅本地模式在设备上检查二维码。'
           })
           .margin({ top: 12 })
 
