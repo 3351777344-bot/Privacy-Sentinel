@@ -112,9 +112,15 @@ def detect_privacy_items(
 ) -> DetectResponse:
     base_result = detect_with_local_rules(image_path, image_id, original_url)
     engine = settings.privacy_engine
+    # An explicitly configured engine (vision_api / hybrid / deepseek) wins over the
+    # mode default, so the operator can pick how "online" enhances without a code
+    # change. The defaults stay local-first: local never leaves the device, and
+    # online prefers the DeepSeek text pipeline (local OCR -> DeepSeek analysis).
+    if engine not in {"agent", "deepseek", "hybrid", "vision_api"}:
+        engine = "deepseek" if settings.deepseek_enabled else "hybrid"
     if processing_mode == "local":
         engine = "agent"
-    elif processing_mode == "online":
+    elif processing_mode == "online" and settings.privacy_engine not in {"deepseek", "hybrid", "vision_api"}:
         engine = "deepseek" if settings.deepseek_enabled else "hybrid"
 
     if engine not in {"agent", "deepseek", "hybrid", "vision_api"} or settings.demo_mode:
