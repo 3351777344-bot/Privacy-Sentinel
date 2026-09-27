@@ -23,9 +23,14 @@ export class TransferSession {
       const result: T = await send();
       this.state = 'sent';
       return result;
-    } catch (_) {
+    } catch (error) {
       this.state = 'failed';
-      throw new Error('已尝试发送，服务器可能已收到数据；结果未完成，未自动重试。');
+      // Keep the transport reason (timeout / refused / HTTP status): the generic
+      // sentence alone made every failure indistinguishable, so nobody could
+      // tell an offline device from a server error.
+      const typedError = error as Error;
+      const reason: string = typedError.message ? typedError.message : '未知错误';
+      throw new Error(`已尝试发送，服务器可能已收到数据；结果未完成，未自动重试。原因：${reason}`);
     }
   }
 

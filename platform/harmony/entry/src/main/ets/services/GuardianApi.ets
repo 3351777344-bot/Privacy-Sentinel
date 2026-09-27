@@ -1,5 +1,6 @@
 import { fileIo } from '@kit.CoreFileKit';
 import { http } from '@kit.NetworkKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { NetworkConsent } from './NetworkConsent';
 import { API_BASE_URL } from './ApiConfig';
 import { ProcessingMode, TransferSession } from './ScanPolicy';
@@ -31,13 +32,51 @@ export class GuardianApi {
       options.header = headers;
       options.expectDataType = http.HttpDataType.STRING;
       options.connectTimeout = 15000;
-      options.readTimeout = 60000;
-      const response = await request.request(`${API_BASE_URL}${path}`, options);
+      // The server may spend up to its own 60s model timeout and then still
+      // answer with a usable fallback, so the client must wait longer than that;
+      // matching 60s made every slow model call look like a network failure.
+      options.readTimeout = 150000;
+      let response: http.HttpResponse;
+      try {
+        response = await request.request(`${API_BASE_URL}${path}`, options);
+      } catch (networkError) {
+        // Connection-level failure: keep the platform code so a timeout is
+        // distinguishable from a refused connection or a TLS problem.
+        const typedError = networkError as BusinessError;
+        const code: number = typedError.code !== undefined ? typedError.code : -1;
+        const detail: string = typedError.message ? typedError.message : '无详情';
+        if (code === 2300028) {
+          throw new Error('请求超时：网络较慢或服务端处理未及时返回，请重试或先用本地检测。');
+        }
+        throw new Error(`网络请求失败（错误码 ${code}）：${detail}`);
+      }
       if (response.responseCode < 200 || response.responseCode >= 300) {
-        throw new Error(`服务返回 ${response.responseCode}。`);
+        throw new Error(`服务端返回 HTTP ${response.responseCode}：${GuardianApi.responseDetail(response.result)}`);
       }
       return response.result as Object;
     } finally { request.destroy(); }
+  }
+
+  /**
+   * Turn an error body into a short, showable reason. FastAPI answers with
+   * ``{"detail": "..."}``; anything else is truncated rather than pasted whole
+   * into a dialog.
+   */
+  private static responseDetail(result: Object | string | undefined): string {
+    const raw: string = typeof result === 'string' ? result : '';
+    if (raw.length === 0) {
+      return '无响应正文';
+    }
+    try {
+      const parsed = JSON.parse(raw) as Record<string, Object>;
+      const detail = parsed.detail;
+      if (typeof detail === 'string' && detail.length > 0) {
+        return detail;
+      }
+    } catch (_) {
+      // Fall through to the raw body.
+    }
+    return raw.length > 120 ? `${raw.substring(0, 120)}…` : raw;
   }
 
   private static async send<T>(path: string, options: http.HttpRequestOptions,
