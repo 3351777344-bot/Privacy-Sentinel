@@ -27,11 +27,12 @@ text could not be extracted (images, archives).
 
 from __future__ import annotations
 
+import calendar
 import json
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Callable
 
 from config import settings
@@ -83,12 +84,11 @@ REQUIREMENT
 规则：
 - 只写要求原文里明确出现的要求，没有把握的字段留空字符串或空数组，禁止编造
 - 老师的话常常是口语的，照读即可：不要因为原文没有出现「格式」「材料清单」「截止时间」这类词就交白卷，原文隐含的信息照常抽取
-- 相对时间要按上面的今天换算成绝对日期：「下周五」「下周之前」「月底前」「三天内」都先换算再填写，并在 notes 里说明这是按今天推算的
+- deadline：**照抄原文的截止时间说法，不要自己算日期**。原文写「2026年7月26日20:00」就照抄；写「下周之前」「月底前」「三天内」也原样写这几个字，换算由服务端代码统一完成
 - formats 只允许出现集合里的值：pdf、docx、zip、png、jpg、txt、md、ppt；"论文""报告"本身不算格式，"Word 文档"算 docx，"PPT/演示文稿"算 ppt
 - namingRule 只在原文明确给出文件命名规则时填写，写成用 _ 分隔的分段模板（例如 学号_姓名_课程名称），保留原文要求的字段顺序；原文没写命名规则就留空字符串
 - requiredMaterials 写必须提交的材料名，用 2~4 个字的通用名（如 封面、摘要、正文、参考文献、源码、截图、PPT、课程论文、实验报告）
 - lengthRequirement 写篇幅要求，去掉空格（如 不少于3000字、不超过20页）
-- deadline 写截止时间，形如 2026年7月26日20:00；只有日期就写日期，无法确定年份就留空
 - contentRequirements 写对内容的实质性要求，每条一句短句（如 正文不少于3000字、需包含需求分析、需给出测试结论、需附运行截图），最多 12 条
 - notes 用一句话说明原文里含糊、需要人工确认的地方，没有就留空字符串"""
 
@@ -265,11 +265,137 @@ def _normalize_naming_rule(raw: Any) -> str | None:
     return rule
 
 
-def _normalize_deadline(raw: Any) -> str | None:
+_WEEKDAYS = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
+_CN_DIGITS = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7,
+              "八": 8, "九": 9, "十": 10}
+
+
+def _cn_number(text: str) -> int | None:
+    """Read 一/两/三/…/十/十五/三十 as an int; ``None`` when it is not one."""
+    if not text:
+        return None
+    if text.isdigit():
+        return int(text)
+    if text == "十":
+        return 10
+    if text.startswith("十"):
+        tail = _CN_DIGITS.get(text[1:], 0)
+        return 10 + tail if tail else None
+    if "十" in text:
+        head, _, tail = text.partition("十")
+        head_value = _CN_DIGITS.get(head)
+        if head_value is None:
+            return None
+        tail_value = _CN_DIGITS.get(tail, 0) if tail else 0
+        return head_value * 10 + tail_value
+    return _CN_DIGITS.get(text)
+
+
+def _end_of_day(day: date) -> str:
+    return f"{day.isoformat()} 23:59"
+
+
+def _next_weekday(today: date, weekday: int, *, force_next_week: bool) -> date:
+    """The coming ``weekday``; with ``force_next_week`` it lands in the next ISO week."""
+    days_ahead = (weekday - today.weekday()) % 7
+    if force_next_week:
+        monday = today - timedelta(days=today.weekday())
+        return monday + timedelta(days=7 + weekday)
+    if days_ahead == 0:
+        days_ahead = 7
+    return today + timedelta(days=days_ahead)
+
+
+def resolve_relative_deadline(value: str, today: date) -> tuple[str, str] | None:
+    """Turn a *relative* Chinese deadline into an absolute one.
+
+    Calendar arithmetic is the one thing a language model reliably gets wrong,
+    and its answer arrives in whatever format it felt like writing. So the model
+    is only asked to quote the phrase ("下周之前", "月底前") and the arithmetic
+    happens here, where it is deterministic, testable, and timezone-anchored to
+    the same clock the deadline check uses.
+
+    Returns ``(absolute, note)`` with ``note`` explaining the推算 for the report,
+    or ``None`` when the phrase is not one this resolver knows — the caller then
+    leaves the model's text alone and the report falls back to 人工确认.
+    """
+    text = " ".join(value.split())
+    if not text:
+        return None
+    # Already absolute (2026-10-03 / 2026年10月3日 / 10月3日): nothing to resolve.
+    if re.search(r"\d{4}\s*[年/-]\s*\d{1,2}", text) or re.fullmatch(r"\d{1,2}\s*月\s*\d{1,2}\s*[日号]?", text):
+        return None
+
+    if "后天" in text:
+        return _end_of_day(today + timedelta(days=2)), "按服务端当天推算为后天"
+    if "明天" in text or "次日" in text:
+        return _end_of_day(today + timedelta(days=1)), "按服务端当天推算为次日"
+    if "今天" in text or "今日" in text:
+        return _end_of_day(today), "按服务端当天推算为今天"
+
+    weeks_ahead = re.search(r"([一二两三四五六七八九十\d]+)\s*周(?:之?后|以后|内)", text)
+    if weeks_ahead:
+        count = _cn_number(weeks_ahead.group(1))
+        if count:
+            return _end_of_day(today + timedelta(weeks=count)), f"按服务端当天推算为 {count} 周后"
+
+    days_ahead = re.search(r"([一二两三四五六七八九十\d]+)\s*(?:天|日)(?:之?后|以后|内)", text)
+    if days_ahead:
+        count = _cn_number(days_ahead.group(1))
+        if count:
+            return _end_of_day(today + timedelta(days=count)), f"按服务端当天推算为 {count} 天后"
+
+    weekday = re.search(r"(下{0,2}|本|这)?\s*(?:周|星期|礼拜)\s*([一二三四五六日天])", text)
+    if weekday:
+        prefix = weekday.group(1) or ""
+        target = _WEEKDAYS.get(weekday.group(2))
+        if target is not None:
+            day = _next_weekday(today, target, force_next_week=prefix.startswith("下"))
+            label = "下周" if prefix.startswith("下") else "本周"
+            return _end_of_day(day), f"按服务端当天推算为{label}{weekday.group(2)}"
+
+    if re.search(r"下{1,2}\s*(?:周|星期|礼拜)", text):
+        # "下周" alone means the whole next week; the deadline is its end.
+        monday = today - timedelta(days=today.weekday())
+        return _end_of_day(monday + timedelta(days=13)), "按服务端当天推算为下周结束（周日）"
+    if re.search(r"本\s*(?:周|星期|礼拜)\s*(?:内|之前|前)?", text):
+        monday = today - timedelta(days=today.weekday())
+        return _end_of_day(monday + timedelta(days=6)), "按服务端当天推算为本周末（周日）"
+
+    month_end = re.search(r"(下{1,2})?\s*月\s*(?:底|末)", text)
+    if month_end:
+        months = 1 if month_end.group(1) else 0
+        year, month = today.year, today.month + months
+        year += (month - 1) // 12
+        month = (month - 1) % 12 + 1
+        last_day = calendar.monthrange(year, month)[1]
+        return _end_of_day(date(year, month, last_day)), "按服务端当天推算为月末"
+
+    month_start = re.search(r"下{1,2}\s*月\s*(?:初|开头|上旬)", text)
+    if month_start:
+        year, month = today.year, today.month + 1
+        year += (month - 1) // 12
+        month = (month - 1) % 12 + 1
+        return _end_of_day(date(year, month, 10)), "按服务端当天推算为下月上旬"
+
+    return None
+
+
+def _normalize_deadline(raw: Any, today: date | None = None) -> str | None:
+    """Keep the deadline as an absolute date, resolving relative phrases in code.
+
+    The model is asked for the phrase it read; this converts "下周之前" on the
+    server clock instead of trusting the model's own arithmetic.
+    """
     value = _clean_text(raw, 30)
     if not value:
         return None
     value = value.removesuffix("之前").removesuffix("前")
+    resolved = resolve_relative_deadline(value, today or date.today())
+    if resolved is not None:
+        absolute, note = resolved
+        value = absolute
+        logger.info("Relative deadline %r resolved to %s (%s)", raw, absolute, note)
     return value or None
 
 
@@ -296,21 +422,22 @@ def parse_requirement_online(
     The warning is a complete Chinese sentence for the user; the caller appends
     it to the report and keeps the local rule parse as the fallback.
 
-    ``today`` anchors relative time expressions ("下周五", "月底前"). Without it
-    the model cannot turn them into a date, and the rule "leave a field empty
-    rather than invent one" then makes it drop the deadline entirely — which is
-    exactly what a conversational brief looks like. It is a parameter so tests
-    can pin the date instead of depending on the day the suite runs.
+    ``today`` is the clock every relative expression is resolved against. The
+    model is told it too (a bare phrase like "下周之前" is meaningless without a
+    reference day), but the arithmetic is done by ``resolve_relative_deadline``,
+    not by the model. The parameter exists so tests can pin the day instead of
+    depending on when the suite runs.
     """
     text = requirement_text.strip()
     if not text:
         return None, "提交要求为空，未进行联网解析。"
 
+    reference_day = today or date.today()
     invoke = caller or _call_model
     payload = invoke(
         PARSE_PROMPT.format(
             requirement_text=text[:4000],
-            today=(today or date.today()).isoformat(),
+            today=reference_day.isoformat(),
         ),
         label="DeepSeek requirement parse",
         max_tokens=PARSE_MAX_TOKENS,
@@ -324,7 +451,7 @@ def parse_requirement_online(
         naming_rule=_normalize_naming_rule(payload.get("namingRule")),
         required_materials=_normalize_materials(payload.get("requiredMaterials")),
         length_requirement=_clean_text(payload.get("lengthRequirement"), 30) or None,
-        deadline=_normalize_deadline(payload.get("deadline")),
+        deadline=_normalize_deadline(payload.get("deadline"), reference_day),
         content_requirements=_normalize_content_requirements(payload.get("contentRequirements")),
         notes=_clean_text(payload.get("notes"), MAX_NARRATIVE_CHARS),
     )

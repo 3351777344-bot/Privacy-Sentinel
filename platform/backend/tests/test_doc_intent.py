@@ -101,13 +101,14 @@ def test_online_parse_reports_a_warning_instead_of_inventing_rules() -> None:
     assert "本地规则" in warning
 
 
-def test_parse_prompt_carries_today_so_relative_dates_can_be_resolved() -> None:
-    """A conversational brief says "下周之前", not a date.
+def test_parse_prompt_asks_for_the_phrase_not_a_computed_date() -> None:
+    """The model quotes the deadline wording; the server converts it.
 
-    Without a date anchor the model cannot convert that, and the prompt's own
-    "leave it empty rather than invent it" rule then drops the deadline — the
-    requirement looks unreadable when it was merely relative. The anchor is
-    pinned here so a later prompt edit cannot silently remove it.
+    An earlier revision asked the model to do the calendar arithmetic itself.
+    That put an unreliable calculator and an unpredictable output format on the
+    critical path of a user-visible check, so the prompt now says the opposite:
+    copy "下周之前" as written, do not compute it. Pinned here so a later prompt
+    edit cannot quietly hand the arithmetic back to the model.
     """
     recorder = _Recorder({"contentRequirements": ["需给出测试结论"]})
     doc_intent.parse_requirement_online(
@@ -118,13 +119,69 @@ def test_parse_prompt_carries_today_so_relative_dates_can_be_resolved() -> None:
     )
 
     prompt = recorder.prompts[0]
-    assert "2026-09-28" in prompt
-    # The rule that turns the anchor into a usable deadline must be there too.
-    assert "相对时间" in prompt
-    assert "换算" in prompt
+    assert "2026-09-28" in prompt          # the reference day is still disclosed
+    assert "不要自己算" in prompt           # ...but the model must not compute
+    assert "照抄" in prompt
 
 
-def test_parse_prompt_defaults_to_the_real_today() -> None:
+@pytest.mark.parametrize(("phrase", "expected"), [
+    ("下周之前", "2026-10-11 23:59"),   # 今天周一：下周整周，取周日
+    ("下周", "2026-10-11 23:59"),
+    ("下周五", "2026-10-09 23:59"),
+    ("本周末", "2026-10-04 23:59"),
+    ("这周三", "2026-09-30 23:59"),
+    ("月底前", "2026-09-30 23:59"),
+    ("下月初", "2026-10-10 23:59"),
+    ("三天内", "2026-10-01 23:59"),
+    ("两周之后", "2026-10-12 23:59"),
+    ("明天", "2026-09-29 23:59"),
+    ("后天", "2026-09-30 23:59"),
+])
+def test_relative_deadlines_are_resolved_in_code(phrase: str, expected: str) -> None:
+    """Calendar arithmetic is code's job, not the model's.
+
+    A language model asked to convert "下周之前" into a date gets it wrong often
+    enough to matter, and its answer arrives in an unpredictable format. So the
+    model is only asked to quote the phrase, and these conversions happen here on
+    one fixed clock — the same clock the deadline check compares against.
+    """
+    assert doc_intent._normalize_deadline(phrase, date(2026, 9, 28)) == expected
+
+
+@pytest.mark.parametrize("phrase", ["2026年7月26日20:00", "2026-10-03", "10月3日", "尽快", "交作业"])
+def test_absolute_or_unreadable_deadlines_are_left_alone(phrase: str) -> None:
+    """Absolute dates pass through; unknown phrases are not guessed at."""
+    assert doc_intent._normalize_deadline(phrase, date(2026, 9, 28)) == phrase
+
+
+def test_a_quoted_relative_phrase_reaches_the_report_as_a_date() -> None:
+    """The model quotes "下周之前" verbatim; the parsed field must be a date.
+
+    This is the path the on-screen deadline check reads, so the phrase must never
+    survive into `parsed.deadline`.
+    """
+    recorder = _Recorder({
+        "deadline": "下周之前",
+        "contentRequirements": ["需给出测试结论"],
+    })
+    parsed, warning = doc_intent.parse_requirement_online(
+        "老师让我们下周之前把东西发他邮箱",
+        active=_settings(),
+        caller=recorder,
+        today=date(2026, 9, 28),
+    )
+
+    assert warning is None
+    assert parsed is not None
+    assert parsed.deadline == "2026-10-11 23:59"
+
+
+def test_parse_prompt_still_states_today() -> None:
+    """The prompt keeps the date even though the arithmetic moved into code.
+
+    A bare phrase ("下周之前") is ambiguous to quote without a reference day, so
+    the model is told which day it is — it just is not asked to compute anything.
+    """
     recorder = _Recorder({"contentRequirements": ["需给出测试结论"]})
     doc_intent.parse_requirement_online("随便写点要求", active=_settings(), caller=recorder)
     assert date.today().isoformat() in recorder.prompts[0]
