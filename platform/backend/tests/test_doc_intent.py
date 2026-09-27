@@ -6,6 +6,7 @@ dropped, what happens when the model fails) rather than the provider's mood.
 """
 
 import json
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
@@ -98,6 +99,42 @@ def test_online_parse_reports_a_warning_instead_of_inventing_rules() -> None:
 
     assert parsed is None
     assert "本地规则" in warning
+
+
+def test_parse_prompt_carries_today_so_relative_dates_can_be_resolved() -> None:
+    """A conversational brief says "下周之前", not a date.
+
+    Without a date anchor the model cannot convert that, and the prompt's own
+    "leave it empty rather than invent it" rule then drops the deadline — the
+    requirement looks unreadable when it was merely relative. The anchor is
+    pinned here so a later prompt edit cannot silently remove it.
+    """
+    recorder = _Recorder({"contentRequirements": ["需给出测试结论"]})
+    doc_intent.parse_requirement_online(
+        "老师让我们下周之前把东西发他邮箱",
+        active=_settings(),
+        caller=recorder,
+        today=date(2026, 9, 28),
+    )
+
+    prompt = recorder.prompts[0]
+    assert "2026-09-28" in prompt
+    # The rule that turns the anchor into a usable deadline must be there too.
+    assert "相对时间" in prompt
+    assert "换算" in prompt
+
+
+def test_parse_prompt_defaults_to_the_real_today() -> None:
+    recorder = _Recorder({"contentRequirements": ["需给出测试结论"]})
+    doc_intent.parse_requirement_online("随便写点要求", active=_settings(), caller=recorder)
+    assert date.today().isoformat() in recorder.prompts[0]
+
+
+def test_prompt_invites_reading_colloquial_briefs() -> None:
+    """The "only what's explicit" rule must not read as "no keywords, no output"."""
+    recorder = _Recorder({"contentRequirements": ["需给出测试结论"]})
+    doc_intent.parse_requirement_online("老师随便说了几句", active=_settings(), caller=recorder)
+    assert "口语" in recorder.prompts[0]
 
 
 def test_a_failing_model_call_degrades_instead_of_raising(monkeypatch) -> None:

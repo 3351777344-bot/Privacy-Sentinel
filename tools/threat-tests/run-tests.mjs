@@ -444,17 +444,19 @@ check(
 
 check('空要求判为 weak', hintOf('   ').level === 'weak', hintOf('   ').level);
 
-// The online-mode hint must *add* to the raw hint, never replace or soften it.
-// The raw advice tells the user to rewrite the brief with keywords the local
-// table knows; in online mode the model reads the prose, so that advice is
-// misleading and the extra sentence is the only thing that corrects it.
+// The online-mode hint must never send the user to rewrite the brief: reading
+// prose is what the model is for. Appending a correction to the keyword advice
+// produced a paragraph that first said "write these exact words" and then said
+// "the exact words are not needed" — long, self-contradicting, and read as a
+// failure. So when the table recognised *nothing*, the advice is replaced.
 const weakRaw = hintOf('提交论文和相关材料');
 const weakOnline = decorateHintForOnline(weakRaw);
 check(
-  '联网提示在原始提示之后追加一句，不替换原文',
-  weakOnline.message.startsWith(weakRaw.message)
-    && weakOnline.message.length > weakRaw.message.length
-    && weakOnline.message.includes('联网增强'),
+  '未识别要求时，联网提示替换掉「请写成这些原词」的建议',
+  weakOnline.message.includes('直接提交')
+    && weakOnline.message.includes('不必改成固定格式')
+    && !weakOnline.message.includes('也可以写成')
+    && weakOnline.message.length < weakRaw.message.length,
   `raw=${weakRaw.message.length} online=${weakOnline.message.length}`
 );
 check(
@@ -464,12 +466,14 @@ check(
     && weakRaw.message === hintOf('提交论文和相关材料').message,
   `${weakOnline.level} / tags=${weakOnline.tags.join(',')}`
 );
+// Partial recognition keeps its (useful) keyword hint and only appends.
 const okOnline = decorateHintForOnline(explicitCase);
 check(
   '已识别要求时联网提示同样追加而保留识别结果',
   okOnline.level === 'ok'
     && okOnline.tags.includes('命名规则')
-    && okOnline.message.startsWith(explicitCase.message),
+    && okOnline.message.startsWith(explicitCase.message)
+    && okOnline.message.includes('还会读原文'),
   `${okOnline.level} / ${okOnline.message.length}`
 );
 

@@ -96,11 +96,14 @@ struct DocPage {
   /**
    * The pre-check hint to show under the editor.
    *
-   * In online mode the hint gains a sentence about what the model adds — the
-   * raw advice tells the user to rewrite the brief with keywords the local table
-   * knows, which is needless work once the model is the one reading it. Derived
-   * here rather than stored so switching the mode updates the text without
-   * re-running `precheck` or touching the persisted brief.
+   * The raw advice is written for the keyword table: when it recognises nothing
+   * it asks the user to rewrite the brief with the words the table knows, which
+   * is needless work once the model is reading the text. In online mode that
+   * advice is therefore replaced (nothing recognised) or extended by one
+   * sentence (partly recognised) — see `decorateHintForOnline`.
+   *
+   * Derived here rather than stored, so switching the mode updates the text
+   * without re-running `precheck` or touching the persisted brief.
    */
   private hintText(): string {
     if (this.hint.message.length === 0) {

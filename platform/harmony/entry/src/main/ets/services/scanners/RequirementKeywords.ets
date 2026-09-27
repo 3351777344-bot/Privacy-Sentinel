@@ -441,16 +441,25 @@ export function checkFormats(formats: string[], fileNames: string[]): FormatChec
 }
 
 const WEAK_MESSAGE: string =
-  '这段文字里没有可识别的格式、材料、命名或字数关键字，服务端只会给出'
-  + '「未识别到明确材料清单」等通用结论。想触发具体检查，请写入 '
-  + 'PDF/Word/压缩包、封面/正文/参考文献/源码/截图/PPT、命名规则：学号_姓名、'
-  + '不少于 3000 字、截止 2026年12月31日 这类原词。';
+  '没读到格式、材料、命名或字数要求。可以写成 PDF、封面/正文、'
+  + '命名用 学号_姓名、不少于 3000 字、截止 2026年12月31日 这类原词，'
+  + '也可以切到「联网分析」提交，由在线 AI 直接读原文。';
 
-/** Appended to the pre-check hint while the online mode is selected. */
-const ONLINE_HINT_SUFFIX: string =
-  ' 当前是联网增强模式：提交后由在线 AI 直接读原文抽取格式、命名、材料清单、'
-  + '篇幅和内容要求，材料正文由 AI 逐条核对；因此文字与上面这些原词不同也能识别，'
-  + '不必为了触发检查而改写要求。';
+/**
+ * Weak-hint text while the online mode is selected.
+ *
+ * The advice above is written for the keyword table, so it lists the words the
+ * table needs — which is exactly the wrong thing to tell someone whose brief a
+ * model is about to read. In online mode the weak case gets its own short
+ * sentence instead of the offline advice plus a correction, which read as a
+ * wall of text that contradicted itself.
+ */
+const ONLINE_WEAK_MESSAGE: string =
+  '没读到格式、材料、命名或字数要求。当前是联网分析：直接提交即可，'
+  + '在线 AI 会读原文抽取要求，不必改成固定格式。';
+
+/** Appended when the keyword table read *some* of the brief, even in online mode. */
+const ONLINE_HINT_SUFFIX: string = ' 联网分析还会读原文，补上关键字表没有的要求。';
 
 /** Advisory pre-check of a submission brief. */
 export function precheck(text: string): RequirementHint {
@@ -522,21 +531,33 @@ export function precheck(text: string): RequirementHint {
 }
 
 /**
- * Add the online-mode sentence to a pre-check hint.
+ * Adapt a pre-check hint to the online mode.
  *
- * The advice above is written for the keyword table, which can only read the
- * brief the way it was typed: when it recognises nothing it tells the user to
- * rewrite the text with the expected words. In online mode that advice is
- * actively wrong — reading prose is exactly what the model is for — and a user
- * who reads it will go and retype a brief that would have worked. So the hint
- * gains one sentence naming the trade-off, and the original advice is kept for
- * *partial* recognition, where the model may still miss a rule the table would
- * have read exactly.
+ * The raw advice is written for the keyword table, which can only read the brief
+ * the way it was typed: when it recognises nothing it tells the user to rewrite
+ * the text with the expected words. That advice is wrong in online mode — reading
+ * prose is exactly what the model is for — and appending a correction to it left
+ * a long paragraph that first said "rewrite it" and then said "don't bother".
+ *
+ * So the two cases are handled differently:
+ *
+ * * nothing recognised — the offline advice is replaced, not appended to. It has
+ *   no value here: the model reads the raw text either way.
+ * * something recognised — the (already useful) hint stays short, with one
+ *   sentence saying the model will also read what the table missed.
  *
  * Pure and export-only so the Node harness can pin the wording; it does not
  * belong in `parseRequirement`, which is contract-pinned.
  */
 export function decorateHintForOnline(hint: RequirementHint): RequirementHint {
+  if (hint.level === 'weak') {
+    const weakOnline: RequirementHint = {
+      level: hint.level,
+      message: ONLINE_WEAK_MESSAGE,
+      tags: hint.tags
+    };
+    return weakOnline;
+  }
   const online: RequirementHint = {
     level: hint.level,
     message: `${hint.message}${ONLINE_HINT_SUFFIX}`,
