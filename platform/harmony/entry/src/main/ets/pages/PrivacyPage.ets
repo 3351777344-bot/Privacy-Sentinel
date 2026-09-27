@@ -1,6 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { picker } from '@kit.CoreFileKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
+import { promptAction } from '@kit.ArkUI';
 import { AppHeader } from '../components/AppHeader';
 import { ProcessingMode, ProcessingModeSelector } from '../components/ProcessingModeSelector';
 import { ResultPanel } from '../components/ResultPanel';
@@ -102,12 +103,17 @@ struct PrivacyPage {
           // the whole enhancement path (the file picker cannot always be read
           // by Scan Kit, which made this a dead end).
           this.statusMessage += ' 原图增强已阻断，可使用端侧黑块遮挡。';
+          await this.showNotice('原图增强已阻断',
+            '图中二维码属于收款码或付款码一类凭据，为避免泄露，原图不会上传。'
+            + '可在下方用端侧黑块遮挡二维码后再分享。');
         } else {
           try {
             const report = await GuardianApi.detectPrivacy(imageUri, imageName, mode, transfer);
             await this.applyReport(report);
           } catch (error) {
-            this.statusMessage += ' ' + this.errorMessage(error, '增强未完成');
+            const reason = this.errorMessage(error, '增强未完成');
+            this.statusMessage += ' ' + reason;
+            await this.showNotice('增强分析未完成', reason + '\n已保留端侧检测结果。');
           }
         }
       }
@@ -171,7 +177,11 @@ struct PrivacyPage {
       this.processed = true;
       await HistoryStore.updateProcessed(this.abilityContext(), this.historyRecordId, this.statusMessage);
     } catch (error) {
-      this.statusMessage = this.errorMessage(error, '无法生成处理图');
+      // A silent one-line hint was invisible in practice, so the reason a mask
+      // could not be produced is surfaced as a dialog the user has to dismiss.
+      const reason = this.errorMessage(error, '无法生成处理图');
+      this.statusMessage = reason;
+      await this.showNotice('无法生成安全预览', reason);
     } finally { this.scanning = false; }
   }
 
@@ -222,6 +232,24 @@ struct PrivacyPage {
   private errorMessage(error: Object, fallback: string): string {
     const typedError = error as Error;
     return typedError.message ? `${fallback}：${typedError.message}` : fallback;
+  }
+
+  /**
+   * Modal notice for outcomes the user must acknowledge. A one-line hint under
+   * the button was too easy to miss, so blocking failures (and blocked uploads)
+   * are reported here instead.
+   */
+  private async showNotice(title: string, message: string): Promise<void> {
+    try {
+      await promptAction.showDialog({
+        title: title,
+        message: message,
+        buttons: [{ text: '知道了', color: '#2563EB' }]
+      });
+    } catch (_) {
+      // A dismissed or unavailable dialog must not break the flow; the same
+      // text stays in the inline status line.
+    }
   }
 
   private modeLabel(mode: string): string {
