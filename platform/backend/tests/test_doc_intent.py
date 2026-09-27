@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
+from clock import china_today
 from detector import doc_intent
 from modules.doc_shield.file_extractor import ExtractedFile
 from modules.doc_shield.requirement_parser import parse_requirement
@@ -181,10 +182,13 @@ def test_parse_prompt_still_states_today() -> None:
 
     A bare phrase ("下周之前") is ambiguous to quote without a reference day, so
     the model is told which day it is — it just is not asked to compute anything.
+    The day is labelled with its zone, so a relative phrase can never be resolved
+    against a host-local "today" that differs from the user's.
     """
     recorder = _Recorder({"contentRequirements": ["需给出测试结论"]})
     doc_intent.parse_requirement_online("随便写点要求", active=_settings(), caller=recorder)
-    assert date.today().isoformat() in recorder.prompts[0]
+    assert china_today().isoformat() in recorder.prompts[0]
+    assert "北京时间" in recorder.prompts[0]
 
 
 def test_prompt_invites_reading_colloquial_briefs() -> None:

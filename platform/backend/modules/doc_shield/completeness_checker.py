@@ -2,6 +2,8 @@ import re
 from datetime import datetime
 from typing import Any
 
+from clock import china_now
+
 from .file_extractor import ExtractedFile
 
 
@@ -67,7 +69,9 @@ def _check_length(files: list[ExtractedFile], requirement: str | None) -> list[d
 
 def _parse_deadline(value: str) -> datetime | None:
     normalized = value.replace("：", ":").removesuffix("之前").removesuffix("前")
-    current_year = datetime.now().year
+    # A bare "10月3日" belongs to the current year *in the submission's timezone*,
+    # not in whatever zone the host happens to be set to.
+    current_year = china_now().year
     formats = (
         ("%Y年%m月%d日%H:%M", normalized),
         ("%Y年%m月%d号%H:%M", normalized),
@@ -105,11 +109,11 @@ def _check_deadline(value: str | None) -> list[dict[str, Any]]:
             "riskLevel": "medium",
             "status": "warning",
         }]
-    expired = datetime.now() > deadline
+    expired = china_now() > deadline
     return [{
         "category": "completeness",
         "label": "提交截止时间已过" if expired else "仍在提交期限内",
-        "evidence": f"识别到截止时间：{deadline.strftime('%Y-%m-%d %H:%M')}。",
+        "evidence": f"识别到截止时间：{deadline.strftime('%Y-%m-%d %H:%M')}（北京时间）。",
         "riskLevel": "high" if expired else "low",
         "status": "fail" if expired else "pass",
     }]

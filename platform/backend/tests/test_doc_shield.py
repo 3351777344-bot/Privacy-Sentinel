@@ -36,3 +36,38 @@ def test_pptx_satisfies_ppt_requirement() -> None:
     checks = check_format([extracted_file("答辩材料.pptx")], parsed)
     assert any(check["label"] == "已上传 ppt 格式材料" and check["status"] == "pass" for check in checks)
     assert not any(check["label"] == "文件后缀不在要求范围内" for check in checks)
+
+
+def test_deadline_check_states_the_timezone_it_compared_against() -> None:
+    """A verdict about "on time" is meaningless without saying in which zone.
+
+    The server's own timezone is not the user's, and a hand-deployed host is
+    often on UTC; the check reads China time explicitly and says so in the
+    evidence line, so a user in a different zone can still see what it compared.
+    """
+    parsed = parse_requirement("截止时间：2099年12月31日 18:00。")
+    checks = check_completeness([extracted_file("报告.pdf")], parsed)
+    deadline_row = next(check for check in checks if check["label"] == "仍在提交期限内")
+    assert "北京时间" in deadline_row["evidence"]
+    assert "2099-12-31 18:00" in deadline_row["evidence"]
+
+
+def test_one_minute_past_the_deadline_is_reported_as_passed(monkeypatch) -> None:
+    """The boundary itself: 17:59 is on time, 18:01 is not — on the same clock.
+
+    Both halves of the comparison read ``china_now``; stubbing it proves the
+    verdict flips at the deadline rather than at some host-local equivalent.
+    """
+    from datetime import datetime
+
+    from modules.doc_shield import completeness_checker
+
+    parsed = parse_requirement("截止时间：2026年9月28日 18:00。")
+
+    monkeypatch.setattr(completeness_checker, "china_now", lambda: datetime(2026, 9, 28, 17, 59))
+    early = {c["label"] for c in completeness_checker.check_completeness([extracted_file("报告.pdf")], parsed)}
+    assert "仍在提交期限内" in early
+
+    monkeypatch.setattr(completeness_checker, "china_now", lambda: datetime(2026, 9, 28, 18, 1))
+    late = {c["label"] for c in completeness_checker.check_completeness([extracted_file("报告.pdf")], parsed)}
+    assert "提交截止时间已过" in late
