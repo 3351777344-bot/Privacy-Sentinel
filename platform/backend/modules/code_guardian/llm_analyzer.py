@@ -47,13 +47,13 @@ def _call_deepseek(code: str, language: str) -> tuple[dict, str | None]:
     empty = {"vulnerabilities": [], "summary": "", "overall_risk": "low"}
     if not settings.deepseek_enabled or not settings.deepseek_api_key:
         logger.warning("DeepSeek API disabled or missing API key, falling back to local rules")
-        return empty, "DeepSeek 联网增强未启用，当前仅显示本地规则检测结果。"
+        return empty, "联网增强分析未启用，当前仅显示本地规则检测结果。"
 
     try:
         from openai import OpenAI
     except ImportError:
         logger.warning("openai package not installed, falling back to local rules")
-        return empty, "服务器缺少 openai 依赖，无法进行 DeepSeek 联网分析。"
+        return empty, "服务端缺少联网分析所需的组件，当前仅显示本地规则检测结果。"
 
     prompt = SECURITY_ANALYSIS_PROMPT.format(language=language, code=code)
 
@@ -73,9 +73,9 @@ def _call_deepseek(code: str, language: str) -> tuple[dict, str | None]:
         if not content:
             if getattr(choice, "finish_reason", None) == "length":
                 logger.error("DeepSeek response truncated by token limit for %s code", language)
-                return empty, "DeepSeek 返回内容超出长度限制，请缩短代码后重试。"
+                return empty, "返回内容超出长度限制，请缩短代码后重试。"
             logger.error("DeepSeek returned empty content (finish_reason=%s)", getattr(choice, "finish_reason", None))
-            return empty, "DeepSeek 未返回有效内容，已回退本地规则检测结果。"
+            return empty, "联网分析未返回有效内容，已回退本地规则检测结果。"
 
         result = json.loads(content)
         logger.debug(
@@ -87,10 +87,10 @@ def _call_deepseek(code: str, language: str) -> tuple[dict, str | None]:
         return result, None
     except json.JSONDecodeError:
         logger.error("Failed to parse DeepSeek response as JSON")
-        return empty, "DeepSeek 返回结果解析失败，已回退本地规则检测结果。"
+        return empty, "联网分析返回结果解析失败，已回退本地规则检测结果。"
     except Exception as exc:
         logger.error("DeepSeek API call failed: %s", exc)
-        return empty, "DeepSeek API 调用失败，请检查网络或 API 配置。"
+        return empty, "联网分析调用失败，请稍后重试或改用本地检测。"
 
 
 def _normalize_findings(raw_vulns: list[dict]) -> list[dict]:

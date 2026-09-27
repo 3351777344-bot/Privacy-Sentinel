@@ -56,7 +56,7 @@ def test_archive_scans_supported_files_and_ignores_dependencies() -> None:
 def test_archive_online_mode_does_not_send_the_whole_project() -> None:
     content = build_zip({"main.py": 'password = "super-secret-value"'})
     result = analyze_code_archive(content, "project.zip", "online", DEFAULT_LIMITS)
-    assert result["detectorSource"] == "rule"
+    assert result["detectorSource"] == "local"
     assert "不会把整个压缩包发送" in result["deepseekWarning"]
 
 

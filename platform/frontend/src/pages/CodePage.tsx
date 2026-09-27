@@ -33,15 +33,25 @@ interface CodePageProps {
 }
 
 const DETECTOR_LABELS: Record<string, string> = {
+  local: '本地规则',
+  online: '联网增强分析',
+  // values emitted by older servers
   rule: '本地规则',
-  deepseek: 'DeepSeek AI',
+  deepseek: '联网增强分析',
+};
+
+const LANGUAGE_SOURCE_LABELS: Record<string, string> = {
+  explicit: '手动指定',
+  filename: '按文件名判断',
+  content: '按内容识别',
+  fallback: '默认语言',
 };
 
 function evidenceFromResult(result: CodeAnalyzeResponse | null): TextFinding[] {
   return (
     result?.vulnerabilities.map((item) => ({
       label:
-        (item.source === 'deepseek' ? '[DeepSeek] ' : '') +
+        (item.source === 'deepseek' ? '[联网增强] ' : '') +
         (item.filePath ? `${item.filePath} / ` : '') +
         (item.line ? `${item.title} / 第 ${item.line} 行` : item.title),
       evidence: `${item.snippet || '未截取到代码片段'}。${item.reason}`,
@@ -105,7 +115,7 @@ export default function CodePage(props: CodePageProps) {
 
   return (
     <>
-      <PageHero eyebrow="Code Guardian" title="Code Guardian 代码卫士" copy="提交代码之前检查单个文件或项目 ZIP；项目包默认执行本地、只读、可解释的安全扫描。" onBack={props.onBack} />
+      <PageHero eyebrow="Code Guardian" title="Code Guardian 代码卫士" copy="提交代码之前检查单个文件或项目 ZIP；项目包以只读方式扫描，不执行其中代码。" onBack={props.onBack} />
       <div className="tool-grid">
         <section className="card form-card">
           <div className="section-title">
@@ -124,15 +134,15 @@ export default function CodePage(props: CodePageProps) {
           <ProcessingModeSelector value={props.processingMode} onChange={props.onProcessingModeChange} />
           <p className="mode-note">
             {props.processingMode === 'local'
-              ? '后端规则模式：授权后将代码或 ZIP 上传到配置的后端，不调用模型；不是浏览器离线分析。'
-              : '联网模式：本地规则结果将由 DeepSeek 增强分析；未配置或调用失败时自动回退本地规则。'}
+              ? '后端规则模式：授权后将代码或 ZIP 上传到已配置的后端执行规则检测，不调用模型服务。'
+              : '联网模式：本地规则结果将交由已配置的模型服务增强分析；未配置或调用失败时自动回退本地规则。'}
           </p>
           {props.result && (
             <p className="muted">
               {isProjectScan
                 ? `项目扫描：${props.result.projectName ?? '未命名项目'}`
-                : `识别语言：${props.result.language}（${props.result.languageSource}，${Math.round(props.result.languageConfidence * 100)}%）`}
-              {props.result.detectorSource && <> · {DETECTOR_LABELS[props.result.detectorSource] ?? props.result.detectorSource}</>}
+                : `识别语言：${props.result.language}（${LANGUAGE_SOURCE_LABELS[props.result.languageSource] ?? '自动识别'}，${Math.round(props.result.languageConfidence * 100)}%）`}
+              {props.result.detectorSource && <> · {DETECTOR_LABELS[props.result.detectorSource] ?? '自动识别'}</>}
             </p>
           )}
           {props.result?.deepseekWarning && (
@@ -237,7 +247,7 @@ export default function CodePage(props: CodePageProps) {
                 <span>F</span>
                 <div>
                   <h3>漏洞修复面板</h3>
-                  <p>勾选需要修复的项目，点击按钮由 DeepSeek 自动生成修复代码。</p>
+                  <p>勾选需要修复的项目，点击按钮由已配置的模型服务生成修复代码。</p>
                 </div>
               </div>
               <div className="vuln-select-list">
@@ -245,7 +255,7 @@ export default function CodePage(props: CodePageProps) {
                   <label className="vuln-checkbox" key={vuln.id}>
                     <input type="checkbox" checked={selectedFixIds.includes(vuln.id)} onChange={() => toggleSelect(vuln.id)} />
                     <span className={`finding-label ${vuln.riskLevel}`}>
-                      {vuln.source === 'deepseek' ? '[DeepSeek] ' : ''}
+                      {vuln.source === 'deepseek' ? '[联网增强] ' : ''}
                       {vuln.line ? `第 ${vuln.line} 行 · ` : ''}{vuln.title}
                     </span>
                   </label>

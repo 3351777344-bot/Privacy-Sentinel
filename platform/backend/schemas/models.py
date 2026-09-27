@@ -123,7 +123,9 @@ class CodeAnalyzeResponse(BaseModel):
     vulnerabilities: List[CodeVulnerability]
     suggestions: List[str]
     shouldSubmit: bool
-    detectorSource: Literal["rule", "deepseek"] = "rule"
+    # User-facing attribution; the legacy "rule"/"deepseek" pair is still accepted
+    # so an older client or cached response cannot break validation.
+    detectorSource: Literal["local", "online", "rule", "deepseek"] = "local"
     deepseekWarning: Optional[str] = None
     scanMode: Literal["single", "project"] = "single"
     projectName: Optional[str] = None

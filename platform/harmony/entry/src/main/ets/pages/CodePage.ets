@@ -19,10 +19,7 @@ import { ScanPolicy, TransferSession } from '../services/ScanPolicy';
 @Entry
 @Component
 struct CodePage {
-  @State codeText: string =
-    'const api_key = "sk-demo-secret";\n' +
-    'db.execute("SELECT * FROM users WHERE id=" + userId);\n' +
-    'console.log("token", token);';
+  @State codeText: string = '';
   @State findings: Finding[] = [];
   @State score: number = 100;
   @State archiveUri: string = '';
@@ -82,7 +79,7 @@ struct CodePage {
           const report = await GuardianApi.analyzeCodeText(code, 'auto', mode, transfer);
           this.findings = local.findings.concat(this.mapVulnerabilities(report));
           this.score = ScanPolicy.score(this.findings);
-          this.snippetStatus += ' 远程来源：' + (report.detectorSource || '规则') + '。' + report.summary;
+          this.snippetStatus += ' ' + report.summary;
           await this.saveLocal('代码增强', this.snippetStatus + ' ' + transfer.describe());
         } catch (error) {
           this.snippetStatus += ' ' + this.errorMessage(error, '增强未完成');

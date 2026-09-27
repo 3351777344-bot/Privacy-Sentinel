@@ -55,13 +55,6 @@ export class SignatureDB {
 
   static meta(): SignatureFeedMeta { return SignatureDB.cachedMeta; }
 
-  static metaLabel(): string {
-    SignatureDB.current();
-    const meta = SignatureDB.cachedMeta;
-    return meta.updatedAt === 0 ? '内置测试规则（非生产情报；未配置或已过期）' :
-      `签名情报 ${meta.version}（${meta.entryCount} 条）`;
-  }
-
   static async installFeed(context: common.Context, csv: string, version: string,
     expiresAt: number = 0, signature: string = ''): Promise<SignatureFeedMeta> {
     await SignatureDB.ensureLoaded(context);

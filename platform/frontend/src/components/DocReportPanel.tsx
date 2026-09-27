@@ -1,6 +1,12 @@
 import type { DocCheckResponse } from '../types/privacy';
 import { EvidenceList, RiskBadge, RiskReport, SuggestionList } from './RiskComponents';
 
+const FILE_STATUS_LABELS: Record<string, string> = {
+  parsed: '已解析内容',
+  metadata_only: '仅读取文件信息',
+  parse_failed: '解析失败',
+};
+
 export default function DocReportPanel({ result }: { result: DocCheckResponse | null }) {
   if (!result) {
     return (
@@ -51,7 +57,7 @@ export default function DocReportPanel({ result }: { result: DocCheckResponse | 
           <div key={file.fileName}>
             <strong>{file.fileName}</strong>
             <span>
-              .{file.extension || '无后缀'} / {file.status} / {file.wordCount} 字
+              .{file.extension || '无后缀'} / {FILE_STATUS_LABELS[file.status] ?? '已读取'} / {file.wordCount} 字
             </span>
           </div>
         ))}

@@ -261,7 +261,7 @@ struct ShareCheckPage {
     this.findings = qr.findings;
     this.score = qr.status === 'failed' ? 0 : this.localScore(this.findings);
     this.riskLevel = qr.status === 'failed' ? 'medium' : this.localOverallRisk(this.findings);
-    this.summary = `${qr.note} 未执行 OCR，文字隐私无法判断。`;
+    this.summary = `${qr.note} 未识别图片中的文字，文字隐私无法判断。`;
     this.phase = 'report';
     if (enhance && this.mode === 'local_only') {
       this.summary += ' 当前为仅本地模式，未发送原图。';
@@ -274,7 +274,7 @@ struct ShareCheckPage {
         }));
         this.score = Math.min(report.score, this.localScore(this.findings));
         this.riskLevel = this.highestRisk(this.findings, report.riskLevel);
-        this.summary = '来源：端侧二维码与远程 OCR · 已授权上传原图。' + report.summary;
+        this.summary = '来源：端侧二维码与联网文字识别 · 已授权上传原图。' + report.summary;
       } catch (_) {
         this.summary += ' 增强分析未完成，保留本地结果；如已同意发送，数据可能已到达服务器。不自动重试。';
       }
@@ -325,7 +325,7 @@ struct ShareCheckPage {
         return;
       }
       if (this.imageId.length === 0) {
-        throw new Error('当前仅完成二维码检测；未获得可处理的远程 OCR 结果。');
+        throw new Error('当前仅完成二维码检测；未获得可处理的联网文字识别结果。');
       }
       const masked = await GuardianApi.processAndDownloadImage(
         this.imageId, this.maskMode, this.mode);
@@ -438,7 +438,7 @@ struct ShareCheckPage {
   private async runDocRoute(fileUri: string): Promise<void> {
     this.sourceUri = fileUri;
     this.sourceLabel = this.fileNameFromUri(fileUri);
-    this.summary = '正在执行端侧通用文件扫描（文件头/PE/PDF/压缩包/宏/哈希黑名单）…';
+    this.summary = '正在本机检查文件类型、结构与已知威胁特征…';
     try {
       await SignatureDB.ensureLoaded(this.abilityContext());
       const buffer: ArrayBuffer =
@@ -468,7 +468,7 @@ struct ShareCheckPage {
       }
       this.score = ScanPolicy.score(this.findings);
       this.riskLevel = ScanPolicy.risk(this.findings);
-      this.summary = archiveNote.length > 0 ? archiveNote : `端侧引擎完成扫描：${this.sourceLabel}`;
+      this.summary = archiveNote.length > 0 ? archiveNote : `已完成本机扫描：${this.sourceLabel}`;
       this.suggestions = ['确认文件来源可信后再保存或打开。'];
       this.phase = 'report';
       await this.recordHistory('doc', '提交护盾', this.riskLevel, this.score, this.summary);
@@ -885,7 +885,7 @@ struct ShareCheckPage {
           if (this.phase === 'offline') {
             SectionCard({
               title: '检测服务不可达',
-              copy: '该内容类型依赖联网检测服务。请确认后端服务已启动，或稍后重试；文件（含 ZIP）、链接与代码片段支持端侧离线检测。'
+              copy: '该内容类型需要联网检测服务。请检查网络连接后重试；文件（含 ZIP）、链接与代码片段可在设备上完成本机检测。'
             }) {
               Button('重试检测')
                 .width('100%')

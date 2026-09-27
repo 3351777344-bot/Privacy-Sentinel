@@ -19,29 +19,23 @@ const REQUIREMENT_KEY: string = 'requirement_text';
 /** Longer than any sane submission brief; guards the KV-Store write. */
 const MAX_REQUIREMENT_CHARS: number = 4000;
 
-/** Pre-filled brief shown the first time the page is opened. */
-export const DEFAULT_REQUIREMENT: string =
-  '提交课程论文 PDF、封面和签字承诺书；文件名使用学号_姓名_课程名称。';
-
 export class RequirementStore {
   private static cached: string = '';
 
   /**
    * Text to show in the editor. Returns `undefined` when storage could not be
    * read, so the caller can retry once the ability context is live rather than
-   * silently falling back to the default and losing the user's edit.
+   * silently losing the user's edit. An empty store yields an empty string: the
+   * requirement is the user's own submission brief, so prefilling a sample would
+   * make the next scan run against text the user never wrote.
    */
   static async load(context: common.Context): Promise<string | undefined> {
     try {
       const store = await preferences.getPreferences(context, STORE_NAME);
       const raw = await store.get(REQUIREMENT_KEY, '');
       const text: string = raw as string;
-      if (text.length > 0) {
-        RequirementStore.cached = text;
-        return text;
-      }
-      RequirementStore.cached = DEFAULT_REQUIREMENT;
-      return DEFAULT_REQUIREMENT;
+      RequirementStore.cached = text;
+      return text;
     } catch (_) {
       return undefined;
     }
@@ -66,7 +60,7 @@ export class RequirementStore {
     return RequirementStore.cached;
   }
 
-  /** Clear the stored copy so the default brief is restored on next open. */
+  /** Clear the stored copy so the editor comes back empty on next open. */
   static async reset(context: common.Context): Promise<string> {
     try {
       const store = await preferences.getPreferences(context, STORE_NAME);
@@ -74,8 +68,8 @@ export class RequirementStore {
       await store.flush();
     } catch (_) {
     }
-    RequirementStore.cached = DEFAULT_REQUIREMENT;
-    return DEFAULT_REQUIREMENT;
+    RequirementStore.cached = '';
+    return '';
   }
 
   /**

@@ -80,6 +80,6 @@ def detect_privacy_items(image_path: str, image_id: str, original_url: str) -> D
         score=calculate_security_score([item.riskLevel for item in items]),
         summary=summary,
         detectorMode="demo",
-        detectorMessage="当前由 GUARDIANHUB_DEMO_MODE 显式启用演示检测框。",
+        detectorMessage="已完成图片隐私检查，请确认标记区域并处理后再分享。",
         items=items,
     )

@@ -170,11 +170,11 @@ def _save_detection_result(result: DetectResponse) -> None:
 def _load_detection_result(image_id: str) -> DetectResponse:
     path = _detection_path(image_id)
     if not path.exists():
-        raise HTTPException(status_code=404, detail="Detection result not found. Please scan the image again.")
+        raise HTTPException(status_code=404, detail="未找到对应的检测结果，请重新检测图片。")
     try:
         return DetectResponse(**json.loads(path.read_text(encoding="utf-8")))
     except (json.JSONDecodeError, OSError, ValueError):
-        raise HTTPException(status_code=500, detail="Stored detection result is unreadable. Please scan again.")
+        raise HTTPException(status_code=500, detail="检测结果已损坏，请重新检测图片。")
 
 
 def _valid_mask_type(mask_type: str | None) -> str:
@@ -263,7 +263,7 @@ def _validate_document_upload(file_name: str, content: bytes) -> None:
 def health() -> dict[str, str]:
     return {
         "status": "ok",
-        "message": "GuardianHub backend is running",
+        "message": "GuardianHub 服务运行正常",
         "privacyDetector": "demo" if settings.demo_mode else settings.privacy_engine,
     }
 
@@ -276,7 +276,7 @@ async def detect(
 ) -> DetectResponse:
     _cleanup_expired_files()
     if processing_mode not in {"local", "online"}:
-        raise HTTPException(status_code=400, detail="处理模式仅支持 local 或 online。")
+        raise HTTPException(status_code=400, detail="不支持的处理模式，请重新选择检测方式。")
     if processing_mode == "online" and request.headers.get("X-Guardian-Consent") != "explicit":
         raise HTTPException(status_code=403, detail="联网模型分析需要本次明确授权。")
     if not file.content_type or not file.content_type.startswith("image/"):
@@ -356,7 +356,7 @@ def process_privacy_image(request: PrivacyProcessRequest) -> MaskResponse:
         selected_items = [item for item in detection.items if item.id in selected_ids]
 
     if not selected_items:
-        raise HTTPException(status_code=400, detail="No privacy areas were selected for processing.")
+        raise HTTPException(status_code=400, detail="尚未选择需要处理的隐私区域。")
 
     mask_type = _valid_mask_type(request.maskType)
     return _apply_mask(request.imageId, mask_type, [item.box for item in selected_items])
@@ -430,9 +430,9 @@ async def analyze_code(request: Request) -> CodeAnalyzeResponse:
         try:
             payload = await request.json()
         except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="请提交 JSON 或 multipart/form-data 请求。")
+            raise HTTPException(status_code=400, detail="请求格式不受支持，请重新提交。")
         if not isinstance(payload, dict):
-            raise HTTPException(status_code=400, detail="JSON 请求体必须是对象。")
+            raise HTTPException(status_code=400, detail="请求内容格式不正确，请重新提交。")
         language = payload.get("language")
         processing_mode = str(payload.get("processingMode") or "local")
         code = str(payload.get("code") or "")
@@ -440,7 +440,7 @@ async def analyze_code(request: Request) -> CodeAnalyzeResponse:
             raise HTTPException(status_code=413, detail="代码内容过大，最大允许 1 MB。")
 
     if processing_mode not in {"local", "online"}:
-        raise HTTPException(status_code=400, detail="处理模式仅支持 local 或 online。")
+        raise HTTPException(status_code=400, detail="不支持的处理模式，请重新选择检测方式。")
 
     if processing_mode == "online" and request.headers.get("X-Guardian-Consent") != "explicit":
         raise HTTPException(status_code=403, detail="联网模型分析需要本次明确授权。")
@@ -603,11 +603,11 @@ def doc_reputation(payload: DocReputationRequest) -> DocReputationResponse:
         message = f"已比对情报库 {threat_feed.version}（{threat_feed.entries} 条）。"
     elif threat_feed.last_error:
         message = (
-            f"云端情报库不可用（{threat_feed.last_error}），本次仅返回内置测试样本比对结果，"
+            "云端情报库暂不可用，本次仅返回内置样本比对结果，"
             "请以端内检测为准。"
         )
     else:
-        message = "云端情报库尚未配置，本次仅返回内置测试样本比对结果，请以端内检测为准。"
+        message = "云端情报库尚未配置，本次仅返回内置样本比对结果，请以端内检测为准。"
 
     return DocReputationResponse(
         feedVersion=threat_feed.version,
@@ -638,7 +638,7 @@ def fix_code(request: CodeFixRequest, http_request: Request) -> CodeFixResponse:
     from openai import OpenAI
 
     if not settings.deepseek_enabled or not settings.deepseek_api_key:
-        raise HTTPException(status_code=503, detail="DeepSeek 代码修复服务未启用。")
+        raise HTTPException(status_code=503, detail="联网代码修复服务未启用。")
 
     items_desc = ""
     if request.items:
@@ -673,7 +673,7 @@ Code to fix ({request.language}):
         )
         content = response.choices[0].message.content
         if not content:
-            raise HTTPException(status_code=502, detail="DeepSeek 未返回有效响应。")
+            raise HTTPException(status_code=502, detail="联网修复服务未返回有效结果。")
         result = json.loads(content)
 
         if request.recordId and request.totalVulns > 0:
@@ -684,7 +684,7 @@ Code to fix ({request.language}):
 
         fixed_code = result.get("fixed_code", "")
         if not isinstance(fixed_code, str) or not fixed_code.strip():
-            raise HTTPException(status_code=502, detail="DeepSeek 未返回有效修复代码。")
+            raise HTTPException(status_code=502, detail="联网修复服务未返回有效的修复代码。")
 
         return CodeFixResponse(
             fixedCode=fixed_code,
@@ -692,7 +692,7 @@ Code to fix ({request.language}):
             language=request.language,
         )
     except json.JSONDecodeError:
-        raise HTTPException(status_code=502, detail="无法解析 AI 修复结果。")
+        raise HTTPException(status_code=502, detail="修复结果无法解析，请稍后重试。")
     except HTTPException:
         raise
     except Exception as exc:

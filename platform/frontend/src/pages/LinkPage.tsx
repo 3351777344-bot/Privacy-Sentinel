@@ -4,6 +4,12 @@ import type { LinkCheckResponse, TextFinding } from '../types/privacy';
 
 const sourceOptions = ['短信', '群聊', '邮件', '二维码', '二手交易', '客服', '学校通知', '陌生人私信', '其他'];
 
+const CHECK_STATUS_LABELS: Record<string, string> = {
+  pass: '通过',
+  warning: '需注意',
+  fail: '未通过',
+};
+
 interface LinkPageProps {
   url: string;
   source: string;
@@ -20,7 +26,11 @@ interface LinkPageProps {
 }
 
 function evidenceFromResult(result: LinkCheckResponse | null): TextFinding[] {
-  return result?.checks.map((item) => ({ label: `${item.label} / ${item.status}`, evidence: item.message, riskLevel: item.riskLevel })) ?? [];
+  return result?.checks.map((item) => ({
+    label: `${item.label} / ${CHECK_STATUS_LABELS[item.status] ?? '已检查'}`,
+    evidence: item.message,
+    riskLevel: item.riskLevel
+  })) ?? [];
 }
 
 export default function LinkPage(props: LinkPageProps) {
@@ -31,7 +41,7 @@ export default function LinkPage(props: LinkPageProps) {
         <section className="card form-card">
           <div className="section-title"><span>01</span><div><h3>链接安全体检</h3><p>输入 URL、短链接、二维码解析出的内容或链接来源说明。</p></div></div>
           <div className="local-mode-banner"><strong>本地静态检查</strong><span>不访问目标地址，二维码也仅在本机解析</span></div>
-          <input value={props.url} onChange={(event) => props.onUrlChange(event.target.value)} placeholder="https://example.com" aria-label="待检查链接" />
+          <input value={props.url} onChange={(event) => props.onUrlChange(event.target.value)} placeholder="在此粘贴待检查链接，如 https://example.com" aria-label="待检查链接" />
           <label className="field-label">链接来源
             <select value={props.source} onChange={(event) => props.onSourceChange(event.target.value)}>
               {sourceOptions.map((source) => <option key={source} value={source}>{source}</option>)}

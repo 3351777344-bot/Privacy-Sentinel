@@ -28,7 +28,7 @@ export default function PrivacyPage(props: PrivacyPageProps) {
       <PageHero
         eyebrow="Privacy Sentinel"
         title="Privacy Sentinel 隐私哨兵"
-        copy="图片分享前先识别敏感区域并打码，保留原有上传、检测、标注、处理和历史记录能力。"
+        copy="图片分享前先识别敏感区域并打码，生成可安全对外分享的版本。"
         onBack={props.onBack}
       />
       <div className="workflow-grid">

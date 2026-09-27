@@ -6,12 +6,11 @@ interface PrivacyItemListProps {
 }
 
 const SOURCE_LABELS: Record<string, string> = {
-  ocr: 'OCR',
-  qr: 'QR',
-  face: '人脸',
-  rule: '规则',
-  vision_api: 'DeepSeek 视觉',
-  demo: '演示',
+  ocr: '文字识别',
+  qr: '二维码',
+  face: '人脸识别',
+  rule: '规则检测',
+  vision_api: '深度分析',
 };
 
 export default function PrivacyItemList({ items }: PrivacyItemListProps) {
@@ -32,7 +31,7 @@ export default function PrivacyItemList({ items }: PrivacyItemListProps) {
             <article className={`privacy-item ${item.riskLevel}`} key={item.id}>
               <div>
                 <strong>{item.label}</strong>
-                <span className="source-tag">{SOURCE_LABELS[item.source ?? 'rule'] ?? item.source}</span>
+                <span className="source-tag">{SOURCE_LABELS[item.source ?? 'rule'] ?? '自动识别'}</span>
                 <span>{item.text}</span>
               </div>
               <RiskBadge level={item.riskLevel} compact />

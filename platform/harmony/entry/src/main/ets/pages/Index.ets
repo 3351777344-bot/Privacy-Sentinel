@@ -214,7 +214,7 @@ struct Index {
                   .fontWeight(FontWeight.Bold)
                   .fontColor('#172033')
                 Blank()
-                Text('ArkData 本地保存')
+                Text('仅保存在本机')
                   .fontSize(11)
                   .fontColor('#15803D')
               }

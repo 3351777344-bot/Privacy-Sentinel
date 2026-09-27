@@ -9,7 +9,7 @@ import { ThreatScanReport } from '../models/ThreatModels';
 import { GuardianApi } from '../services/GuardianApi';
 import { HistoryStore } from '../services/HistoryStore';
 import { ReputationClient, ReputationOutcome, ReputationQuery } from '../services/ReputationClient';
-import { DEFAULT_REQUIREMENT, RequirementStore } from '../services/RequirementStore';
+import { RequirementStore } from '../services/RequirementStore';
 import { RequirementAudit, auditRequirement, scoreForFindings } from '../services/RequirementAudit';
 import { RequirementHint, precheck } from '../services/scanners/RequirementKeywords';
 import {
@@ -48,11 +48,11 @@ interface LocalScanOutcome {
 @Component
 struct DocPage {
   /**
-   * Persisted across page visits — this used to be a bare literal, so leaving
-   * the page and returning reset the brief to the built-in sample and the next
-   * scan silently ran against that instead of what the user typed.
+   * The submission brief the user types; persisted across page visits.
+   * Deliberately starts empty — prefilling a sample brief made the next scan run
+   * against text the user never wrote.
    */
-  @State requirementText: string = DEFAULT_REQUIREMENT;
+  @State requirementText: string = '';
   /** Exact brief the on-screen report was produced from. */
   @State scannedRequirement: string = '';
   /** Rules the server reported extracting, rendered under the report. */
@@ -290,7 +290,7 @@ struct DocPage {
       await SignatureDB.ensureLoaded(context);
     } catch (_) {
     }
-    engineNote = `端内引擎 L1 · 特征库 ${SignatureDB.metaLabel()}`;
+    engineNote = '端侧扫描完成：文件结构、威胁特征与命名格式均在本机判定。';
     this.engineMessage = engineNote;
     this.cloudNote = '';
     this.requirementNote = '';

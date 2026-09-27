@@ -91,7 +91,8 @@ export interface CodeAnalyzeResponse {
   vulnerabilities: CodeVulnerability[];
   suggestions: string[];
   shouldSubmit: boolean;
-  detectorSource?: 'rule' | 'deepseek';
+  /** 'local' | 'online'; 'rule' | 'deepseek' come from older servers. */
+  detectorSource?: 'local' | 'online' | 'rule' | 'deepseek';
   deepseekWarning?: string;
   scanMode?: 'single' | 'project';
   projectName?: string | null;

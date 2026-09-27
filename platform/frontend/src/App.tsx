@@ -72,17 +72,6 @@ const modules: Array<{
   }
 ];
 
-const sampleCode = `import os
-
-api_key = "sk-demo-hardcoded-secret"
-name = input("name:")
-sql = "SELECT * FROM users WHERE name = '" + name + "'"
-os.system("ping " + name)
-print("token", api_key)`;
-
-const sampleDocRequirement =
-  '课程论文提交要求：请于 2026 年 7 月 10 日 18:00 前提交 PDF 文件，命名规则为 学号-姓名-课程论文。材料需包含封面、摘要、正文、参考文献；正文不少于 3000 字。';
-
 export default function App() {
   const [page, setPage] = useState<Page>('home');
   const [detectResult, setDetectResult] = useState<DetectResult | null>(null);
@@ -96,14 +85,14 @@ export default function App() {
   const [loadingMask, setLoadingMask] = useState(false);
   const [error, setError] = useState('');
 
-  const [codeText, setCodeText] = useState(sampleCode);
+  const [codeText, setCodeText] = useState('');
   const [codeLanguage, setCodeLanguage] = useState('auto');
   const [codeFile, setCodeFile] = useState<File | null>(null);
   const [codeResult, setCodeResult] = useState<CodeAnalyzeResponse | null>(null);
   const [loadingCode, setLoadingCode] = useState(false);
   const [codeProcessingMode, setCodeProcessingMode] = useState<ProcessingMode>('local');
 
-  const [url, setUrl] = useState('https://example.com/login?redirect=pay&token=abc123abc123abc123abc123');
+  const [url, setUrl] = useState('');
   const [linkSource, setLinkSource] = useState('短信');
   const [qrFile, setQrFile] = useState<File | null>(null);
   const [qrMessage, setQrMessage] = useState('');
@@ -111,7 +100,7 @@ export default function App() {
   const [linkResult, setLinkResult] = useState<LinkCheckResponse | null>(null);
   const [loadingLink, setLoadingLink] = useState(false);
 
-  const [docRequirement, setDocRequirement] = useState(sampleDocRequirement);
+  const [docRequirement, setDocRequirement] = useState('');
   const [docFiles, setDocFiles] = useState<File[]>([]);
   const [docResult, setDocResult] = useState<DocCheckResponse | null>(null);
   const [loadingDoc, setLoadingDoc] = useState(false);
@@ -481,7 +470,7 @@ export default function App() {
                     <div className="aside-title"><h2>风险分布</h2><span>共 {mergedHistory.length} 项</span></div>
                     <div className="distribution-body">
                       <div className="risk-donut" style={{ '--high': riskCounts.high, '--medium': riskCounts.medium, '--total': Math.max(mergedHistory.length, 1) } as React.CSSProperties}><span><b>{mergedHistory.length}</b><small>总风险</small></span></div>
-                      <div className="distribution-legend"><p><i className="high" /> high <b>{riskCounts.high}</b></p><p><i className="medium" /> medium <b>{riskCounts.medium}</b></p><p><i className="low" /> low <b>{riskCounts.low}</b></p></div>
+                      <div className="distribution-legend"><p><i className="high" /> 高风险 <b>{riskCounts.high}</b></p><p><i className="medium" /> 中风险 <b>{riskCounts.medium}</b></p><p><i className="low" /> 低风险 <b>{riskCounts.low}</b></p></div>
                     </div>
                   </section>
                   <section className="card privacy-note"><strong>◆ 安全与隐私说明</strong><p>默认采用本地处理。仅当你主动选择联网增强时，相关图片或代码才会发送至已配置的模型服务；链接与提交材料始终本地检查。</p></section>

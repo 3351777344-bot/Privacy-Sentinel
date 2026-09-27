@@ -15,8 +15,8 @@ import { ProcessingMode, ScanPolicy, TransferSession } from '../services/ScanPol
 @Entry
 @Component
 struct LinkPage {
-  @State urlText: string = 'http://xn--campus-login.example/login?redirect=payment&token=demo';
-  @State sourceText: string = '陌生短信';
+  @State urlText: string = '';
+  @State sourceText: string = '';
   @State findings: Finding[] = [];
   @State score: number = 100;
   @State statusMessage: string = '等待检测';

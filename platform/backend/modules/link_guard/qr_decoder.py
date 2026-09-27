@@ -49,4 +49,4 @@ def decode_qr_image(content: bytes, max_pixels: int) -> list[str]:
                 decoded.append(value.strip())
         return list(dict.fromkeys(decoded))
     except ImportError as exc:
-        raise RuntimeError("本地二维码引擎未安装。") from exc
+        raise RuntimeError("二维码识别功能暂不可用，请稍后重试。") from exc

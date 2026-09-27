@@ -1,3 +1,4 @@
+import logging
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -13,6 +14,8 @@ from schemas.models import Box, DetectResponse, PrivacyItem
 from .mock_detector import detect_privacy_items as detect_demo_items
 from .qr_content import classify_qr_payload
 
+
+logger = logging.getLogger(__name__)
 
 OCR_CONFIDENCE_THRESHOLD = 0.55
 OCR_MAX_SIDE = 1600
@@ -321,7 +324,7 @@ def detect_privacy_items(image_path: str, image_id: str, original_url: str) -> D
 
     items: list[PrivacyItem] = []
     detector_mode = "ocr"
-    detector_message = "已使用本地 OCR 与二维码检测引擎分析图片。"
+    detector_message = "已在本机完成图片文字与二维码检查。"
     try:
         result_texts, result_boxes, result_scores = _run_ocr(image_path, width, height)
         items.extend(
@@ -336,7 +339,10 @@ def detect_privacy_items(image_path: str, image_id: str, original_url: str) -> D
         )
     except (ImportError, OSError, RuntimeError, ValueError) as exc:
         detector_mode = "unavailable"
-        detector_message = f"OCR 引擎暂不可用，仅完成二维码检测：{type(exc).__name__}。"
+        # The cause stays in the server log: users get the consequence, not the
+        # exception class name.
+        logger.warning("Local text recognition unavailable: %s", exc)
+        detector_message = "图片文字识别暂不可用，本次仅完成二维码检查，请人工复核。"
 
     qr_items = _detect_qr_codes(image_path, width, height, image_id)
     existing_qr_boxes = [item.box for item in items if item.type == "qr_code"]
@@ -352,14 +358,14 @@ def detect_privacy_items(image_path: str, image_id: str, original_url: str) -> D
         items.append(qr_item)
         existing_qr_boxes.append(qr_item.box)
     if detector_mode == "unavailable" and qr_items:
-        detector_message = "OCR 引擎暂不可用，已完成二维码检测。"
+        detector_message = "图片文字识别暂不可用，已完成二维码检查，请人工复核。"
 
     levels = [item.riskLevel for item in items]
     risk_level = highest_risk(levels)
     score = calculate_security_score(levels)
     if items:
         labels = "、".join(dict.fromkeys(item.label for item in items))
-        summary = f"真实检测到 {len(items)} 个敏感区域（{labels}），建议确认并处理后再分享。"
+        summary = f"检测到 {len(items)} 个敏感区域（{labels}），建议确认并处理后再分享。"
     elif detector_mode == "unavailable":
         summary = "检测引擎未完整就绪，不能据此确认图片安全，请人工复核。"
     else:

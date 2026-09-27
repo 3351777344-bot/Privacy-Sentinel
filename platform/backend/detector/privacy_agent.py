@@ -153,16 +153,13 @@ def _detect_agent(
     items.extend(_detect_faces(image_path, width, height, image_id))
 
     levels = [item.riskLevel for item in items]
-    detector_message = (
-        f"Local Privacy Agent completed analysis with OCR={settings.ocr_engine}, "
-        f"QR={settings.qr_engine}, face={settings.face_engine}. External image API is disabled."
-    )
+    detector_message = "本次仅在本机完成图片隐私检查，未发送给外部模型。"
     if base_result.detectorMode == "unavailable":
-        detector_message = f"{detector_message} OCR was unavailable; partial local checks were used."
+        detector_message = f"{detector_message}部分内容未能识别，结果可能需要人工复核。"
     summary = base_result.summary
     if items:
-        labels = ", ".join(dict.fromkeys(item.label for item in items))
-        summary = f"Local Privacy Agent found {len(items)} privacy area(s): {labels}. Review and process before sharing."
+        labels = "、".join(dict.fromkeys(item.label for item in items))
+        summary = f"检测到 {len(items)} 个隐私区域（{labels}），建议确认并处理后再分享。"
 
     return base_result.model_copy(
         update={
@@ -213,33 +210,21 @@ def _detect_deepseek(
         seen.add(key)
 
     levels = [item.riskLevel for item in merged]
-    labels = ", ".join(dict.fromkeys(item.label for item in merged))
+    labels = "、".join(dict.fromkeys(item.label for item in merged))
     if deepseek_items:
         summary = (
-            f"DeepSeek 文本分析在 {len(texts)} 段 OCR 文字中发现 {len(deepseek_items)} 个隐私项"
-            f"（{labels}），结合本地 OCR 共 {len(merged)} 个区域。"
+            f"已完成联网语义分析，结合本机文字识别共发现 {len(merged)} 个隐私区域"
+            f"（{labels}），建议确认并处理后再分享。"
         )
-        detector_message = (
-            f"DeepSeek mode: 本地 OCR ({settings.ocr_engine}) 提取文字 → "
-            f"DeepSeek ({settings.deepseek_model}) 文本分析。"
-        )
+        detector_message = "已在本机提取图片文字，并完成联网语义分析。"
     elif deepseek_error:
-        summary = (
-            f"DeepSeek 分析失败：{deepseek_error}仅依赖本地 OCR 结果。"
-        )
-        detector_message = (
-            f"DeepSeek mode: 本地 OCR 正常 ({settings.ocr_engine})，"
-            f"DeepSeek ({settings.deepseek_model}) 调用失败。"
-        )
+        summary = deepseek_error
+        detector_message = "本机文字识别已完成，本次结果仅来自本机识别。"
     elif texts:
         summary = (
-            f"DeepSeek 在 {len(texts)} 段 OCR 文字中未识别到额外隐私项，"
-            f"本地 OCR 命中 {len(local_items)} 项。"
+            f"已在本机完成文字识别，未发现额外隐私项；本机规则命中 {len(local_items)} 项。"
         )
-        detector_message = (
-            f"DeepSeek mode: 本地 OCR ({settings.ocr_engine}) + "
-            f"DeepSeek ({settings.deepseek_model}) 文本分析。"
-        )
+        detector_message = "已在本机提取图片文字，并完成联网语义分析。"
     else:
         summary = base_result.summary
         detector_message = base_result.detectorMessage
@@ -272,10 +257,11 @@ def _detect_vision_api(
         items = [_enrich_item(item) for item in base_result.items]
         if _vision_active():
             # The model was reachable but unusable: genuine failure, so say so.
-            fallback_message = "DeepSeek 视觉 API 调用失败，已回退到本地 OCR 检测。"
+            fallback_message = "联网图像分析调用失败，已保留本机识别结果。"
         else:
             fallback_message = (
-                "DeepSeek 视觉未启用，本次仅执行后端 OCR；图像已上传到后端，未发送给外部模型。"
+                "联网图像分析未启用，本次仅在本机与服务端规则内完成检查；"
+                "图像已上传到服务端，未发送给外部模型。"
             )
         return base_result.model_copy(
             update={
@@ -296,15 +282,15 @@ def _detect_vision_api(
             deduped.append(item)
 
     levels = [item.riskLevel for item in deduped]
-    labels = ", ".join(dict.fromkeys(item.label for item in deduped))
+    labels = "、".join(dict.fromkeys(item.label for item in deduped))
     return DetectResponse(
         imageId=image_id,
         originalImageUrl=original_url,
         riskLevel=highest_risk(levels),
         score=calculate_security_score(levels),
-        summary=f"DeepSeek 视觉分析检测到 {len(deduped)} 个隐私区域（{labels}）。请确认并处理后再分享。",
+        summary=f"已完成图片内容分析，共检测到 {len(deduped)} 个隐私区域（{labels}）。请确认并处理后再分享。",
         detectorMode="vision_api",
-        detectorMessage=f"DeepSeek 视觉 ({settings.deepseek_model}) 直接分析图片，已结合本地 OCR 结果。",
+        detectorMessage="已完成图片内容分析，并合并本机文字识别结果。",
         items=deduped,
     )
 
@@ -338,24 +324,21 @@ def _detect_hybrid(
     vision_verified_count = sum(1 for item in enhanced_items if item.source == "vision_api")
 
     levels = [item.riskLevel for item in enhanced_items]
-    labels = ", ".join(dict.fromkeys(item.label for item in enhanced_items))
+    labels = "、".join(dict.fromkeys(item.label for item in enhanced_items))
     if _vision_active():
         summary = (
-            f"混合检测发现 {len(enhanced_items)} 个隐私区域（{labels}），"
-            f"其中 DeepSeek 视觉新增 {vision_new_count} 项、验证 {vision_verified_count} 项。"
+            f"已完成图片内容分析，共发现 {len(enhanced_items)} 个隐私区域（{labels}），"
+            f"其中联网分析新增 {vision_new_count} 项、复核 {vision_verified_count} 项。"
         )
-        detector_message = (
-            f"Hybrid mode: 本地 OCR ({settings.ocr_engine}) + "
-            f"DeepSeek 视觉 ({settings.deepseek_model}) 联合分析。"
-        )
+        detector_message = "已在本机提取图片文字，并完成联网图像分析。"
     else:
         summary = (
             f"本地检测发现 {len(enhanced_items)} 个隐私区域（{labels}）。"
-            "DeepSeek 视觉未启用，未进行联网图像分析。"
+            "联网图像分析未启用，图像未发送给外部模型。"
         )
         detector_message = (
-            f"后端规则分析：OCR={settings.ocr_engine}，QR={settings.qr_engine}，"
-            f"face={settings.face_engine}。DeepSeek 未启用；图像已上传到后端，未发送给外部模型。"
+            "本次仅在本机与服务端规则内完成检查，联网图像分析未启用；"
+            "图像已上传到服务端，未发送给外部模型。"
         )
     return DetectResponse(
         imageId=image_id,

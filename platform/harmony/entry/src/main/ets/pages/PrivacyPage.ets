@@ -89,7 +89,7 @@ struct PrivacyPage {
       this.score = ScanPolicy.score(this.findings);
       this.localComplete = this.qrReport.status !== 'failed';
       this.resultMeta = '来源：端侧二维码与链接规则 · ' + transfer.describe();
-      this.statusMessage = this.qrReport.note + ' 未执行文字OCR，请人工检查文字隐私。';
+      this.statusMessage = this.qrReport.note + ' 未识别图片中的文字，请人工检查文字隐私。';
       this.historyRecordId = await HistoryStore.add(this.abilityContext(), {
         module: 'privacy', moduleLabel: '隐私哨兵', riskLevel: ScanPolicy.risk(this.findings),
         score: this.score, summary: this.statusMessage + ' ' + this.resultMeta,
@@ -113,30 +113,6 @@ struct PrivacyPage {
     }
   }
 
-  private async detectDemo(): Promise<void> {
-    if (this.processingMode !== 'online') {
-      this.statusMessage = '本地模式请从文件或相册选择图片；远程演示样本需切换联网增强。';
-      return;
-    }
-    this.imageUri = '';
-    this.imageName = 'privacy_sentinel_demo_qr.png';
-    this.hasImage = true;
-    this.processed = false;
-    this.processedImageUri = '';
-    this.scanning = true;
-    this.statusMessage = this.processingMode === 'online' ?
-      '正在载入演示图，并调用 DeepSeek 联网增强…' :
-      '正在载入演示图片并执行真实隐私检测…';
-    try {
-      const report = await GuardianApi.detectPrivacyDemo(this.processingMode);
-      await this.applyReport(report);
-    } catch (error) {
-      this.statusMessage = this.errorMessage(error, '演示图片检测失败');
-    } finally {
-      this.scanning = false;
-    }
-  }
-
   private async applyReport(report: DetectResponse): Promise<void> {
     this.imageId = report.imageId;
     this.score = report.score;
@@ -149,8 +125,7 @@ struct PrivacyPage {
       };
     }));
     this.score = ScanPolicy.score(this.findings);
-    const modeHint = report.detectorMode ? ` · 引擎 ${report.detectorMode}` : '';
-    this.statusMessage = `${report.summary}${modeHint}`;
+    this.statusMessage = report.summary;
     if (report.detectorMessage && report.detectorMessage.length > 0) {
       this.statusMessage = `${this.statusMessage}\n${report.detectorMessage}`;
     }
@@ -182,7 +157,7 @@ struct PrivacyPage {
           this.statusMessage = '远程处理完成，请复核遮挡范围。';
         } finally { this.resultMeta = '远程遮挡 · ' + transfer.describe(); }
       } else {
-        throw new Error('无可靠二维码坐标且未进行远程OCR，无法自动定位；请手动编辑图片。');
+        throw new Error('无可靠二维码坐标且未进行联网文字识别，无法自动定位；请手动编辑图片。');
       }
       this.processed = true;
       await HistoryStore.updateProcessed(this.abilityContext(), this.historyRecordId, this.statusMessage);
@@ -261,7 +236,7 @@ struct PrivacyPage {
         Column() {
           SectionCard({
             title: '01 选择图片',
-            copy: '默认端侧二维码检查，不上传。文字 OCR 需选择联网增强并授权；敏感二维码原图不上传。'
+            copy: '默认端侧二维码检查，不上传。文字识别需选择联网增强并授权；敏感二维码原图不上传。'
           }) {
             ProcessingModeSelector({
               mode: this.processingMode,
@@ -298,9 +273,6 @@ struct PrivacyPage {
                 this.pickFromAlbum();
               })
 
-            Text('演示请从文件或相册选择本地合成样本；应用不再伪造远程演示结果。')
-              .fontSize(11).fontColor('#64748B').lineHeight(18).margin({ top: 10 }).width('100%')
-
             Button('增强分析 需本次授权')
               .enabled(this.hasImage && !this.scanning && this.processingMode !== 'local_only')
               .onClick(() => { this.detectSelectedImage(this.imageUri, this.imageName, true); })
@@ -336,7 +308,7 @@ struct PrivacyPage {
             score: this.score,
             contextCopy: this.resultMeta,
             verdict: ScanPolicy.verdict(this.findings, this.localComplete, this.qrReport.uploadBlocked),
-            emptyCopy: '选择图片后执行端侧二维码检测；OCR 与人物检测需本次授权增强。'
+            emptyCopy: '选择图片后执行端侧二维码检测；文字识别与人物检测需本次授权增强。'
           })
           .margin({ top: 12 })
 

@@ -87,7 +87,7 @@ def run_url_rules(normalized_url: str) -> tuple[list[dict], list[dict]]:
             pass
 
     if "xn--" in host:
-        checks.append(_check("link_003_idn", "国际化域名", "warning", "medium", "域名包含 Punycode，需警惕视觉相似字符仿冒。"))
+        checks.append(_check("link_003_idn", "国际化域名", "warning", "medium", "域名使用特殊编码字符，需警惕视觉相似字符仿冒。"))
 
     if len(host) > 45 or host.count(".") >= 4:
         checks.append(_check("link_004", "域名结构", "warning", "medium", "域名过长或子域层级较多，可能用于混淆真实来源。"))

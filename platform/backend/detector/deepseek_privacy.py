@@ -102,12 +102,12 @@ def _call_deepseek(texts: list[str]) -> tuple[list[dict], str | None]:
     """Call DeepSeek chat completions on the OCR text corpus."""
     empty = {"items": [], "summary": ""}
     if not settings.deepseek_enabled or not settings.deepseek_api_key:
-        return [], "DeepSeek 未启用或缺少 API Key，已回退本地规则检测结果。"
+        return [], "联网语义分析未启用，已保留本机检测结果。"
 
     try:
         from openai import OpenAI
     except ImportError:
-        return [], "服务器缺少 openai 依赖，无法调用 DeepSeek。"
+        return [], "联网语义分析服务暂不可用，已保留本机检测结果。"
 
     ocr_text = "\n".join(f"[{idx}] {t}" for idx, t in enumerate(texts))
     prompt = PRIVACY_ANALYSIS_PROMPT.format(ocr_text=ocr_text[:6000])
@@ -126,20 +126,19 @@ def _call_deepseek(texts: list[str]) -> tuple[list[dict], str | None]:
         )
         content = response.choices[0].message.content
         if not content:
-            finish_reason = getattr(response.choices[0], "finish_reason", None)
-            return [], f"DeepSeek 未返回有效内容（finish_reason={finish_reason}）。"
+            return [], "联网语义分析未返回有效结果，已保留本机检测结果。"
 
         result = json.loads(content)
         items = result.get("items") if isinstance(result, dict) else None
         if not isinstance(items, list):
-            return [], "DeepSeek 返回结构不包含 items 数组。"
+            return [], "联网语义分析返回内容无法识别，已保留本机检测结果。"
         return items, None
     except json.JSONDecodeError:
         logger.error("Failed to parse DeepSeek privacy response as JSON")
-        return [], "DeepSeek 返回结果解析失败。"
+        return [], "联网语义分析结果解析失败，已保留本机检测结果。"
     except Exception as exc:
         logger.error("DeepSeek privacy call failed: %s", exc)
-        return [], f"DeepSeek API 调用失败：{type(exc).__name__}。"
+        return [], "联网语义分析未完成，已保留本机检测结果。"
 
 
 def analyze_ocr_text(

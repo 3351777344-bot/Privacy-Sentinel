@@ -25,7 +25,7 @@ def build_report(detection: LanguageDetection, vulnerabilities: list[dict]) -> d
     if vulnerabilities:
         high_count = sum(1 for item in vulnerabilities if item["riskLevel"] == "high")
         medium_count = sum(1 for item in vulnerabilities if item["riskLevel"] == "medium")
-        summary = f"检测到 {len(vulnerabilities)} 项代码安全风险，其中 high {high_count} 项、medium {medium_count} 项，建议修复后再提交。"
+        summary = f"检测到 {len(vulnerabilities)} 项代码安全风险，其中高风险 {high_count} 项、中风险 {medium_count} 项，建议修复后再提交。"
     else:
         summary = "当前代码未命中本地高危规则，整体风险较低。"
 

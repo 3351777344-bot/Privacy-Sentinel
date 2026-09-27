@@ -20,7 +20,7 @@ interface RiskBadgeProps {
 export function RiskBadge({ level, compact = false }: RiskBadgeProps) {
   return (
     <em className={`risk-pill ${level} ${compact ? 'compact' : ''}`}>
-      {compact ? level : `${riskText[level]} / ${level}`}
+      {riskText[level]}
     </em>
   );
 }
@@ -84,7 +84,7 @@ export function RiskReport({
         <span>{badgeLabel}</span>
         <div>
           <h3>{title}</h3>
-          <p>统一使用 high / medium / low 风险等级和 0-100 安全评分。</p>
+          <p>综合风险等级与 0-100 安全评分给出结论。</p>
         </div>
       </div>
       {riskLevel ? (

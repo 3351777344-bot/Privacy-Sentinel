@@ -263,7 +263,7 @@ def analyze_code_archive(
     primary_language = language_counts.most_common(1)[0][0] if language_counts else "other"
     warning = None
     if processing_mode == "online":
-        warning = "项目 ZIP 已完成本地全量扫描；为保护项目代码，当前不会把整个压缩包发送给 DeepSeek。"
+        warning = "项目 ZIP 已完成本地全量扫描；为保护项目代码，当前不会把整个压缩包发送给模型服务。"
 
     return {
         "riskLevel": risk_level,
@@ -275,7 +275,7 @@ def analyze_code_archive(
         "vulnerabilities": vulnerabilities,
         "suggestions": suggestions,
         "shouldSubmit": risk_level == "low",
-        "detectorSource": "rule",
+        "detectorSource": "local",
         "deepseekWarning": warning,
         "scanMode": "project",
         "projectName": PurePosixPath(filename).stem,

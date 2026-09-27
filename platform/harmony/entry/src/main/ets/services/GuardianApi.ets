@@ -104,11 +104,7 @@ export class GuardianApi {
         { name: 'processing_mode', contentType: 'text/plain', data: 'online' },
         { name: 'file', contentType: GuardianApi.imageContentType(name), remoteFileName: 'image' + name.substring(name.lastIndexOf('.')), data: data }
       ]
-    }, transfer, `发送原图用于OCR与模型增强，共 ${data.byteLength} 字节。文字和人物等内容也会一并上传。`);
-  }
-
-  static async detectPrivacyDemo(mode: ProcessingMode = 'hybrid'): Promise<DetectResponse> {
-    throw new Error('演示请使用本地合成样本，从文件或相册选择。');
+    }, transfer, `发送原图用于文字与内容识别，共 ${data.byteLength} 字节。文字和人物等内容也会一并上传。`);
   }
 
   /**
