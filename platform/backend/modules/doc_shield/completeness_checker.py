@@ -69,22 +69,31 @@ def _check_length(files: list[ExtractedFile], requirement: str | None) -> list[d
 
 def _parse_deadline(value: str) -> datetime | None:
     normalized = value.replace("：", ":").removesuffix("之前").removesuffix("前")
+    # The resolver emits "2026-10-11 23:59" (a bare space between date and time),
+    # which none of the patterns below accepted: the only spaced formats expect
+    # Chinese units. Normalising the space away makes every pattern work on a
+    # compact string, so the two halves cannot drift apart again.
+    compact = re.sub(r"\s+", "", normalized)
     # A bare "10月3日" belongs to the current year *in the submission's timezone*,
     # not in whatever zone the host happens to be set to.
     current_year = china_now().year
     formats = (
-        ("%Y年%m月%d日%H:%M", normalized),
-        ("%Y年%m月%d号%H:%M", normalized),
-        ("%Y-%m-%d%H:%M", normalized),
-        ("%Y/%m/%d%H:%M", normalized),
-        ("%Y年%m月%d日", normalized),
-        ("%Y年%m月%d号", normalized),
-        ("%Y-%m-%d", normalized),
-        ("%Y/%m/%d", normalized),
-        ("%Y年%m月%d日%H:%M", f"{current_year}年{normalized}"),
-        ("%Y年%m月%d号%H:%M", f"{current_year}年{normalized}"),
-        ("%Y年%m月%d日", f"{current_year}年{normalized}"),
-        ("%Y年%m月%d号", f"{current_year}年{normalized}"),
+        ("%Y年%m月%d日%H:%M:%S", compact),
+        ("%Y年%m月%d号%H:%M:%S", compact),
+        ("%Y-%m-%d%H:%M:%S", compact),
+        ("%Y/%m/%d%H:%M:%S", compact),
+        ("%Y年%m月%d日%H:%M", compact),
+        ("%Y年%m月%d号%H:%M", compact),
+        ("%Y-%m-%d%H:%M", compact),
+        ("%Y/%m/%d%H:%M", compact),
+        ("%Y年%m月%d日", compact),
+        ("%Y年%m月%d号", compact),
+        ("%Y-%m-%d", compact),
+        ("%Y/%m/%d", compact),
+        ("%Y年%m月%d日%H:%M", f"{current_year}年{compact}"),
+        ("%Y年%m月%d号%H:%M", f"{current_year}年{compact}"),
+        ("%Y年%m月%d日", f"{current_year}年{compact}"),
+        ("%Y年%m月%d号", f"{current_year}年{compact}"),
     )
     for date_format, candidate in formats:
         try:
@@ -105,7 +114,7 @@ def _check_deadline(value: str | None) -> list[dict[str, Any]]:
         return [{
             "category": "completeness",
             "label": "截止时间需要人工确认",
-            "evidence": f"已识别截止时间“{value}”，但无法转换为明确日期。",
+            "evidence": f"已识别截止时间“{value}”，但无法转换为明确日期，请人工核对是否已过期。",
             "riskLevel": "medium",
             "status": "warning",
         }]

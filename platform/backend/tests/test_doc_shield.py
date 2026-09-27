@@ -1,3 +1,5 @@
+import pytest
+
 from modules.doc_shield.completeness_checker import check_completeness
 from modules.doc_shield.file_extractor import ExtractedFile
 from modules.doc_shield.format_checker import check_format
@@ -71,3 +73,31 @@ def test_one_minute_past_the_deadline_is_reported_as_passed(monkeypatch) -> None
     monkeypatch.setattr(completeness_checker, "china_now", lambda: datetime(2026, 9, 28, 18, 1))
     late = {c["label"] for c in completeness_checker.check_completeness([extracted_file("报告.pdf")], parsed)}
     assert "提交截止时间已过" in late
+
+
+@pytest.mark.parametrize("value", [
+    "2026-10-11 23:59",        # what the relative resolver emits
+    "2026-10-11 23:59:00",
+    "2026-10-11",
+    "2026年10月11日 23:59",
+    "2026/10/11 23:59",
+    "10月11日",
+])
+def test_every_deadline_shape_the_pipeline_can_produce_is_parsed(value: str) -> None:
+    """A shape the resolver emits but the parser rejects silently loses the verdict.
+
+    That is exactly what happened once: the resolver produced "2026-10-11 23:59"
+    and the format table only knew the unspaced and Chinese-unit spellings, so the
+    check degraded to 需人工确认 with a date that was perfectly readable. Every
+    spelling any producer in this pipeline can emit is pinned here.
+    """
+    from datetime import datetime
+
+    from modules.doc_shield.completeness_checker import _parse_deadline
+
+    parsed = _parse_deadline(value)
+    assert isinstance(parsed, datetime), f"{value!r} 无法被解析"
+    if ":" in value:
+        assert (parsed.hour, parsed.minute) != (0, 0), "带时分的写法不应被当成零点"
+    else:
+        assert (parsed.hour, parsed.minute) == (23, 59), "只给日期时应按当日结束处理"
