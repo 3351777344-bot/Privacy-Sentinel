@@ -32,3 +32,10 @@ test/
 *.key
 platform/harmony/build-profile.local.json5
 platform/samples/generated/
+
+# Local review notes and one-off helper scripts; not part of the project.
+analysis/
+# Agent/editor tool state. Submission documents are produced outside the repo.
+.codex/
+.reasonix/
+.agents/
