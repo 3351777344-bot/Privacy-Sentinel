@@ -25,7 +25,13 @@
 .\verify-api.ps1
 ```
 
-如后端不是默认地址，可传入 `-BaseUrl`。
+如后端不是默认地址，可传入 `-BaseUrl`。脚本默认只跑本地规则路径（不花模型额度）；
+要连带验收提交护盾的联网解析，加 `-OnlineDoc`，此时会显式带 `X-Guardian-Consent: explicit`
+与 `processing_mode=online` 调两次模型：
+
+```powershell
+.\verify-api.ps1 -OnlineDoc
+```
 
 ## Link Guard
 
@@ -46,3 +52,9 @@ http://xn--campus-login.example/login?redirect=payment&token=demo123456789
 ```
 
 上传 `doc-risky/` 中的文本文件，可以演示命名不规范、隐私信息和材料缺失提示。
+
+同一份要求也能演示联网解析：`processing_mode=online` 时由模型读原文，除格式、命名、材料清单、
+篇幅和截止时间外，还会读出只有模型能识别的**内容类要求**（例如「正文不少于 3000 字」
+「需给出测试结论」），并逐条判定材料是否满足。`doc-risky/course-paper.txt` 正文只有 72 字、
+没有结论也没有参考文献，正好让这些判定有确定的对照结果。对着真模型自检提示词用
+`python tools/doc-intent-check.py`，对线上部署复验用 `analysis/verify-doc-online/`。

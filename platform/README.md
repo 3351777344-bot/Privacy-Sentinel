@@ -117,6 +117,10 @@ python tools/doc-intent-check.py --brief samples/doc-risky/requirement.txt --fil
 它只读本地文件与 `.env`，不写历史、不碰 API；未启用模型时打印回退路径并以 0 退出（这是受支持的结果），
 只有「模型答了但答案不可用」才返回 1。`--enable --base http://127.0.0.1:8099 --key x` 可指向本地桩服务联调。
 
+对**已部署后端**的复验记录与探针在 [`tools/doc-online-probe/`](../tools/doc-online-probe/README.md)：
+五个接口用例（基线 / 联网 / 逐字段回退 / 缺授权 403 / 复跑）、限流额度检查，以及 2026-09-28 的生产实测结果。
+它补的正是自检工具与单元测试都覆盖不到的一层——线上那台机器上的提示词与合并逻辑，对着真模型是否仍然成立。
+
 ## 联网分析失败时怎么定位
 
 `POST /api/detect` 的响应里有两个容易混淆的字段，区别是「给用户看的」和「给运维看的」：

@@ -52,9 +52,19 @@ systemctl is-active guardianhub
 ```
 
 公网部署默认启用按客户端限流：`/api/*` 每客户端 600 次 / 60 秒，模型端点
-（`/api/detect`、`/api/code/analyze`、`/api/code/fix`）120 次 / 300 秒。上限刻意远高于真实用量，
+（`/api/detect`、`/api/code/analyze`、`/api/code/fix`、`/api/doc/check`）120 次 / 300 秒。上限刻意远高于真实用量，
 只用于拦截脚本洪水；`GUARDIANHUB_RATE_LIMIT_ENABLED=false` 可整体关闭，重启服务即清空计数。
 完整配置见 `platform/.env.example`。
+
+部署完确认线上版本：`/api/health` 只说明进程活着，`privacyDetector` 也只反映引擎名，
+两者都不代表代码已更新，**必须发一次真实业务请求**。最快的判定是 `POST /api/detect`：
+响应里出现 `detectorDetail` 字段，说明线上已包含 `b7159fb` 之后的代码。
+
+```bash
+curl -s -X POST https://api.guardianhub.tech/api/detect \
+  -H 'X-Guardian-Consent: explicit' -F processing_mode=online \
+  -F 'file=@platform/samples/emulator-gallery/03_form_demo.png;type=image/png'
+```
 
 ## 验证与构建
 
@@ -69,6 +79,10 @@ cd ../harmony
 ```
 
 端侧威胁验证：先运行 python tools/threat-tests/make_fixtures.py，再运行 node tools/threat-tests/prepare.mjs、node --experimental-strip-types tools/threat-tests/run-tests.mjs 和 node tools/threat-tests/privacy-contract.mjs。
+
+对**线上部署**的复验不在这套单元测试里：单元测试注入固定的模型返回，验不了提示词与真实返回是否对得上。
+`tools/doc-online-probe/` 放的是对着真实服务跑过的探针与实测记录（`probe.py` 五个用例、
+`probe2.py` 的回退与限流检查），改完提示词或合并逻辑后可以重跑一遍。
 
 ## 交付文档
 
