@@ -9,8 +9,9 @@ instead of by code:
 
 ``*.hap`` is gitignored, so the manifest can never ship the binary itself.
 Artifacts and the manifest live outside the repository (submission materials are
-kept separate from project code); set ``GUARDIANHUB_DELIVERY_DIR`` to point at
-that directory — it defaults to ``<home>/GuardianHub-delivery``.
+kept separate from project code). The delivery directory is resolved in this
+order: ``GUARDIANHUB_DELIVERY_DIR`` if set, then ``GuardianHub-delivery`` next to
+the repository, then ``<home>/GuardianHub-delivery``.
 """
 import argparse
 import hashlib
@@ -22,7 +23,19 @@ import sys
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-DELIVERY = Path(os.environ.get("GUARDIANHUB_DELIVERY_DIR") or (Path.home() / "GuardianHub-delivery"))
+
+
+def _delivery_dir() -> Path:
+    override = os.environ.get("GUARDIANHUB_DELIVERY_DIR")
+    if override:
+        return Path(override)
+    sibling = root.parent / "GuardianHub-delivery"
+    if sibling.is_dir():
+        return sibling
+    return Path.home() / "GuardianHub-delivery"
+
+
+DELIVERY = _delivery_dir()
 MANIFEST = Path("submission-materials/release/SHA256SUMS.txt")
 # Documentation that legitimately lives beside the manifest and is not an artifact.
 NON_ARTIFACTS = {"RELEASE_NOTES.md"}
