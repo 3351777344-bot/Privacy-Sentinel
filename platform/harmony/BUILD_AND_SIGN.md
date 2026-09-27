@@ -22,14 +22,20 @@ The length of the storePassword or keyPassword field in the signature configurat
 
 ## 一、编译
 
-编译脚本会临时把生产后端地址写进 `ApiConfig.ets`，结束自动还原：
-
 ```powershell
 cd E:\GuardianHub\platform\harmony
 $env:DEVECO_SDK_HOME = 'E:\DevEcoStudio\sdk'
 & 'E:\DevEcoStudio\tools\node\node.exe' 'E:\DevEcoStudio\tools\hvigor\bin\hvigorw.js' `
   --mode module -p product=default -p module=entry@default -p buildMode=release assembleHap --no-daemon
 ```
+
+> **这条命令不会注入生产地址。** 仓库里的 `services/ApiConfig.ets` 默认是模拟器用的
+> `http://10.0.2.2:8001`，直接编译出的包在真机上连不上后端。发布前必须先把它改成
+> `https://api.guardianhub.tech`，编译完再还原。`build.ps1 -ApiBaseUrl` 会自动做这步注入与还原，
+> 但它走 DevEco CLI，本机可能被信任确认拦住。
+>
+> 编译完成后可以从包内自证：HAP 是 zip，`ets/modules.abc` 里应当出现生产地址，
+> 且不出现 `10.0.2.2:8001`。
 
 > `build.ps1 -BuildMode release` 走的是 DevEco CLI，本机可能被
 > `Ensure the project source is trustworthy before proceeding.` 拦住；
@@ -86,6 +92,11 @@ $hdc = 'E:\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe'
 ```
 
 手机上若装过**不同证书**签名的旧版本，需先卸载再安装。
+
+还要注意**版本号只能升不能降**。包内 `versionCode` 必须与发布 Profile 一致（当前 2.0.0 / versionCode 2），
+否则签名校验会拒绝；但它低于早期开发版的 1000000，所以**任何装过旧版的设备都会把新包判为降级安装**，
+报 `install version downgrade (9568263)` 并拒绝——这一步在签名校验之前发生，签名正确也救不了。
+解法是先卸载旧版，或去 AGC 用更大的 versionCode 重新签发 Profile。演示设备请提前处理。
 
 ## 六、签名材料与口令
 

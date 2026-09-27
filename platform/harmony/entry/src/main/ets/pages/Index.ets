@@ -90,13 +90,13 @@ struct Index {
               .width('100%')
 
             Row() {
-              Text('仅本地')
+              Text('端侧优先')
                 .fontSize(11)
                 .fontColor('#FFFFFF')
               Text('联网可选')
                 .fontSize(11)
                 .fontColor('#FFFFFF')
-              Text('风险可解释')
+              Text('结论有依据')
                 .fontSize(11)
                 .fontColor('#FFFFFF')
             }

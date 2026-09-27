@@ -5,7 +5,11 @@ GuardianHub 在 HarmonyOS 系统分享菜单中接收图片、链接、代码和
 ## 当前状态
 
 发布签名 HAP 由 `platform/harmony/BUILD_AND_SIGN.md` 的流程在本机构建（产物与哈希清单不入库）；
-生产后端已部署在 `https://api.guardianhub.tech`；真实设备分享回归与演示视频尚待完成。
+生产后端已部署在 `https://api.guardianhub.tech`，以 systemd 服务 `guardianhub.service` 运行
+（`Restart=always` 且已设开机自启，只监听 `127.0.0.1:8001`，由 Caddy 对外终止 TLS）；
+真实设备分享回归与演示视频尚待完成。
+**服务器不会自动获取代码更新**，部署是手工的，仓库领先于线上属于常态；而 `/api/health`
+只要进程存活就返回 200，无法反映代码是否已更新，确认线上版本必须靠一次真实业务请求。详见下文「部署」。
 不得将此状态描述为已具备正式参赛提交条件。
 
 ## 数据处理边界
@@ -32,6 +36,22 @@ API 使用 8001，Web 使用 5174；8000 和 5173 属于 HekGemi，不要停止�
 
 - [健康检查](http://127.0.0.1:8001/api/health)
 - [Web 演示](http://127.0.0.1:5174/)
+
+## 部署
+
+生产后端位于服务器 `/root/guardianhub`，从本仓库 `main` 分支手工部署：
+
+```bash
+cd /root/guardianhub
+git pull
+systemctl restart guardianhub
+systemctl is-active guardianhub
+```
+
+公网部署默认启用按客户端限流：`/api/*` 每客户端 600 次 / 60 秒，模型端点
+（`/api/detect`、`/api/code/analyze`、`/api/code/fix`）120 次 / 300 秒。上限刻意远高于真实用量，
+只用于拦截脚本洪水；`GUARDIANHUB_RATE_LIMIT_ENABLED=false` 可整体关闭，重启服务即清空计数。
+完整配置见 `platform/.env.example`。
 
 ## 验证与构建
 

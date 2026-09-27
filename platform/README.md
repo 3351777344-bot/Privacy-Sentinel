@@ -53,7 +53,7 @@ cd harmony
 .\build.ps1
 ```
 
-当前已接入系统图片/文件 Picker、四模块 API、ArkData 本地历史、处理图预览/系统保存与 Share Kit，已通过 ArkTS 编译并生成调试 HAP。模拟器此前已验证首页、四页面路由及 Link Guard 真实请求；新增保存、分享和历史能力仍需在完成模拟器许可确认后做交互验收。
+当前已接入系统图片/文件 Picker、四模块 API、ArkData 本地历史、处理图预览/系统保存与 Share Kit，可产出 release 签名的 HAP（见 [harmony/BUILD_AND_SIGN.md](harmony/BUILD_AND_SIGN.md)）。模拟器上已验证首页与四个模块页的路由、文案与配色，并在应用内走通了一次联网链接检查（服务端访问日志确认收到该请求）；**真实设备**上的系统分享面板、相册授权与 Share Kit 交互仍未回归，编译与模拟器验证都不能替代这一项。
 
 详细环境和联调说明见 [harmony/README.md](harmony/README.md)。
 
@@ -77,6 +77,14 @@ Copy-Item .env.example .env
 | 单个材料文件 | 10 MB |
 | 单次材料 | 8 个文件、合计 25 MB |
 | 本地产物保留 | 24 小时 |
+| 每客户端 `/api/*` 请求 | 600 次 / 60 秒 |
+| 每客户端模型调用 | 120 次 / 300 秒 |
+
+限流面向公网部署：后端没有账号鉴权，而 `/api/detect`、`/api/code/analyze`、`/api/code/fix`
+会消耗付费模型额度，所以这三条路径按客户端 IP 单独计额。上限刻意远高于真实用量
+（一次完整演示约 2–6 次模型调用），只用于拦截脚本洪水。可用 `GUARDIANHUB_RATE_LIMIT_ENABLED=false`
+整体关闭，或把某项额度设为 0 停用该项。客户端身份取 `X-Forwarded-For` 的**最后一段**
+（反向代理实际观察到的地址），首段由客户端自行填写、可伪造，取它等于形同虚设。
 
 ## 测试与构建
 
