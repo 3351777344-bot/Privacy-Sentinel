@@ -128,6 +128,27 @@ def test_non_http_scopes_pass_through():
     assert seen == ['lifespan']
 
 
+def test_configured_budgets_cannot_block_a_realistic_demo():
+    """A judged walkthrough is a handful of model calls, never a flood.
+
+    This guards the shipped numbers themselves: a blocked demo is far worse than
+    a stranger's wasted quota, so if someone lowers the ceilings into range of
+    real work, this fails before the demo does.
+    """
+    limiter = RateLimiter(
+        api_limit=main.settings.rate_limit_api_requests,
+        api_window=main.settings.rate_limit_api_window_seconds,
+        model_limit=main.settings.rate_limit_model_requests,
+        model_window=main.settings.rate_limit_model_window_seconds,
+    )
+    model_scope = {'path': '/api/detect', 'headers': [], 'client': ('203.0.113.7', 0)}
+    api_scope = {'path': '/api/history', 'headers': [], 'client': ('203.0.113.7', 0)}
+    # Several back-to-back walkthroughs inside one window must all be served.
+    assert all(limiter.retry_after(model_scope, float(second)) is None for second in range(30))
+    # The dashboard polls /api/history and module-averages every five seconds.
+    assert all(limiter.retry_after(api_scope, float(second)) is None for second in range(24))
+
+
 def _middleware_names():
     return [middleware.cls.__name__ for middleware in main.app.user_middleware]
 

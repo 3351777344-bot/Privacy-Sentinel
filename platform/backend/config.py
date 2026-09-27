@@ -76,13 +76,21 @@ class Settings:
     vision_image_max_side: int = _int_env("GUARDIANHUB_VISION_IMAGE_MAX_SIDE", 1280)
     # Per-client request budgets. The public deployment has no account
     # authentication and three endpoints can spend paid model quota, so those
-    # paths draw from a tighter budget than the rest of the API. Defaults sit far
-    # above real usage; set a limit to 0 to disable that budget, or turn the
-    # whole feature off with GUARDIANHUB_RATE_LIMIT_ENABLED=false.
+    # paths draw from a tighter budget than the rest of the API.
+    #
+    # These ceilings exist to stop automated flooding, not to meter real work,
+    # and they are deliberately set orders of magnitude above a judged demo: a
+    # full walkthrough of the four modules costs 2-6 model calls in five
+    # minutes, and the busiest legitimate client is the dashboard polling
+    # /api/history twice every five seconds (24 requests a minute). A blocked
+    # demo would be far worse than a stranger's wasted quota, so the numbers
+    # only need to catch a script hammering the endpoints. Set a limit to 0 to
+    # drop that budget, or set GUARDIANHUB_RATE_LIMIT_ENABLED=false to disable
+    # the feature entirely.
     rate_limit_enabled: bool = _bool_env("GUARDIANHUB_RATE_LIMIT_ENABLED", True)
-    rate_limit_api_requests: int = _int_env("GUARDIANHUB_RATE_LIMIT_API_REQUESTS", 240)
+    rate_limit_api_requests: int = _int_env("GUARDIANHUB_RATE_LIMIT_API_REQUESTS", 600)
     rate_limit_api_window_seconds: int = _int_env("GUARDIANHUB_RATE_LIMIT_API_WINDOW_SECONDS", 60)
-    rate_limit_model_requests: int = _int_env("GUARDIANHUB_RATE_LIMIT_MODEL_REQUESTS", 30)
+    rate_limit_model_requests: int = _int_env("GUARDIANHUB_RATE_LIMIT_MODEL_REQUESTS", 120)
     rate_limit_model_window_seconds: int = _int_env("GUARDIANHUB_RATE_LIMIT_MODEL_WINDOW_SECONDS", 300)
 
 
