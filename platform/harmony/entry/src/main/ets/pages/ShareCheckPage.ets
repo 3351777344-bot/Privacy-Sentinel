@@ -1,6 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { emitter } from '@kit.BasicServicesKit';
 import { AppHeader } from '../components/AppHeader';
+import { ProcessingModeSelector } from '../components/ProcessingModeSelector';
 import { ResultPanel } from '../components/ResultPanel';
 import { SectionCard } from '../components/SectionCard';
 import {
@@ -13,13 +14,16 @@ import {
   ScanReport
 } from '../models/SecurityModels';
 import { GuardianApi } from '../services/GuardianApi';
+import { ArchivePreview, ArchiveReview } from '../services/ArchiveReview';
 import { HistoryStore } from '../services/HistoryStore';
 import { LocalRuleEngine } from '../services/LocalRuleEngine';
 import { ProcessedImageService } from '../services/ProcessedImageService';
-import { QrClassification, QrContentService } from '../services/QrContentService';
+import { QrContentService } from '../services/QrContentService';
+import { QrImageReport, QrRules } from '../services/QrRules';
 import { ShareOutService } from '../services/ShareOutService';
 import { SignatureDB } from '../services/SignatureDB';
 import { ThreatScanner } from '../services/ThreatScanner';
+import { ProcessingMode, ScanPolicy } from '../services/ScanPolicy';
 import { SHARE_INTENT_KEY, ShareIntent } from '../shareability/ShareCheckAbility';
 
 type GateRoute = 'image' | 'doc' | 'link' | 'code' | 'unknown';
@@ -62,6 +66,9 @@ struct ShareCheckPage {
    * on-device rule engine, so the report can stop claiming a full check.
    */
   @State fallbackReason: string = '';
+  @State mode: ProcessingMode = 'hybrid';
+  private gateGeneration: number = 0;
+  private qrReport: QrImageReport = QrRules.analyze([]);
 
   private abilityContext(): common.UIAbilityContext {
     return this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -74,7 +81,8 @@ struct ShareCheckPage {
     this.runGate();
   }
 
-  private runGate(): void {
+  private async runGate(): Promise<void> {
+    const generation: number = ++this.gateGeneration;
     const intent: ShareIntent | undefined =
       AppStorage.get<ShareIntent>(SHARE_INTENT_KEY);
     if (!intent || (intent.uris.length === 0 && intent.text.length === 0)) {
@@ -87,7 +95,35 @@ struct ShareCheckPage {
     }
     this.resetState();
     if (intent.uris.length > 1) {
-      this.multiImageHint = `收到 ${intent.uris.length} 个文件，本次仅检测第一个。`;
+      const total: number = Math.min(intent.uris.length, 20);
+      const combined: Finding[] = [];
+      let combinedScore: number = 100;
+      let failed: number = 0;
+      for (let index = 0; index < total; index++) {
+        const uri: string = intent.uris[index];
+        const fileRoute: GateRoute = this.routeForUri(intent, uri);
+        try {
+          if (fileRoute === 'image') { await this.runImageRoute(uri); }
+          else { await this.runDocRoute(uri); }
+          this.findings.forEach((item: Finding) => combined.push({
+            title: `文件 ${index + 1} · ${item.title}`, evidence: item.evidence,
+            suggestion: item.suggestion, riskLevel: item.riskLevel
+          }));
+          combinedScore = Math.min(combinedScore, this.score);
+        } catch (_) { failed++; }
+        if (generation !== this.gateGeneration) { return; }
+      }
+      this.route = 'unknown';
+      this.findings = combined;
+      this.score = failed > 0 ? Math.min(combinedScore, 50) : combinedScore;
+      this.riskLevel = this.localOverallRisk(combined);
+      this.phase = 'report';
+      this.sourceLabel = `批量分享（${total} 个文件）`;
+      const overflow: number = intent.uris.length - total;
+      this.multiImageHint = `已逐个扫描 ${total} 个文件，失败 ${failed} 个` +
+        (overflow > 0 ? `；另有 ${overflow} 个超过单批 20 个上限，未扫描。` : '。');
+      this.summary = this.multiImageHint + ' 批量报告不提供一键继续分享，请返回系统分享面板处理。';
+      return;
     }
     this.route = this.resolveRoute(intent);
     switch (this.route) {
@@ -109,6 +145,13 @@ struct ShareCheckPage {
     }
   }
 
+  private routeForUri(intent: ShareIntent, uri: string): GateRoute {
+    if (intent.utd.includes('image') || this.hasFileExtension(uri, 'png|jpe?g|webp|bmp|gif')) {
+      return 'image';
+    }
+    return 'doc';
+  }
+
   private resetState(): void {
     this.phase = 'analyzing';
     this.findings = [];
@@ -125,6 +168,7 @@ struct ShareCheckPage {
     this.historyRecordId = '';
     this.sourceText = '';
     this.fallbackReason = '';
+    this.qrReport = QrRules.analyze([]);
   }
 
   /**
@@ -209,72 +253,35 @@ struct ShareCheckPage {
     return hits >= 2;
   }
 
-  private async runImageRoute(imageUri: string): Promise<void> {
+  private async runImageRoute(imageUri: string, enhance: boolean = false): Promise<void> {
     this.sourceUri = imageUri;
-    this.sourceLabel = this.fileNameFromUri(imageUri);
-    this.summary = '正在本机解析二维码，并执行 OCR 隐私检测…';
-
-    // Decode the code on-device first. This keeps a payment credential from
-    // having to leave the device to be recognised, and gives the channel a
-    // usable result when the backend is unreachable.
-    const qrFindings: Finding[] = [];
-    try {
-      const qr: QrClassification = await QrContentService.decodeImage(imageUri);
-      if (qr.found) {
-        qrFindings.push({
-          title: qr.label,
-          evidence: qr.text,
-          suggestion: qr.suggestion,
-          riskLevel: this.toRiskLevel(qr.riskLevel)
-        });
+    this.sourceLabel = '分享图片';
+    const qr: QrImageReport = await QrContentService.decodeAll(imageUri);
+    this.qrReport = qr;
+    this.findings = qr.findings;
+    this.score = qr.status === 'failed' ? 0 : this.localScore(this.findings);
+    this.riskLevel = qr.status === 'failed' ? 'medium' : this.localOverallRisk(this.findings);
+    this.summary = `${qr.note} 未执行 OCR，文字隐私无法判断。`;
+    this.phase = 'report';
+    if (enhance && this.mode === 'local_only') {
+      this.summary += ' 当前为仅本地模式，未发送原图。';
+    } else if (enhance && !qr.uploadBlocked) {
+      try {
+        const report = await GuardianApi.detectPrivacy(imageUri, 'shared-image.jpg', this.mode);
+        this.imageId = report.imageId;
+        this.findings = this.findings.concat(report.items.map((item: PrivacyItem): Finding => {
+          return { title: item.label, evidence: item.text, suggestion: item.suggestion, riskLevel: item.riskLevel };
+        }));
+        this.score = Math.min(report.score, this.localScore(this.findings));
+        this.riskLevel = this.highestRisk(this.findings, report.riskLevel);
+        this.summary = '来源：端侧二维码与远程 OCR · 已授权上传原图。' + report.summary;
+      } catch (_) {
+        this.summary += ' 增强分析未完成，保留本地结果；如已同意发送，数据可能已到达服务器。不自动重试。';
       }
-    } catch (_) {
+    } else if (enhance) {
+      this.summary += ' 敏感二维码禁止上传原图。';
     }
-
-    try {
-      const report: DetectResponse =
-        await GuardianApi.detectPrivacy(imageUri, this.sourceLabel, 'online');
-      this.imageId = report.imageId;
-      const serverFindings: Finding[] = report.items.map((item: PrivacyItem): Finding => {
-        return {
-          title: item.label,
-          evidence: item.text.length > 0 ? item.text : report.summary,
-          suggestion: item.suggestion,
-          riskLevel: item.riskLevel
-        };
-      });
-      // Keep the on-device verdict for the code and append the server's OCR
-      // findings, skipping the server's own code entry to avoid duplicates.
-      this.findings = qrFindings.concat(
-        serverFindings.filter((item: Finding): boolean => !this.isQrFinding(item.title))
-      );
-      this.score = report.score;
-      this.riskLevel = this.highestRisk(this.findings, report.riskLevel);
-      const modeHint = report.detectorMode ? ` · 引擎 ${report.detectorMode}` : '';
-      this.summary = `${report.summary}${modeHint}`;
-      if (report.detectorMessage && report.detectorMessage.length > 0) {
-        this.summary = `${this.summary}\n${report.detectorMessage}`;
-      }
-      this.phase = 'report';
-      await this.recordHistory('privacy', '隐私哨兵', this.riskLevel, this.score, this.summary);
-    } catch (error) {
-      if (qrFindings.length > 0) {
-        // The code was read locally, so the channel still produces a real
-        // finding instead of a dead end.
-        this.findings = qrFindings;
-        this.score = this.localScore(qrFindings);
-        this.riskLevel = this.localOverallRisk(qrFindings);
-        this.fallbackReason = this.errorMessage(error, '无法连接 GuardianHub 服务');
-        this.summary = `检测服务不可达，已改用端侧二维码解析：${this.findings[0].title}。` +
-          '本机未执行 OCR，手机号、证件号、地址等文字类隐私未覆盖，建议人工复核。';
-        this.suggestions = ['联网后可执行完整 OCR 检测，覆盖文字类隐私信息。'];
-        this.phase = 'report';
-        await this.recordHistory('privacy', '隐私哨兵', this.riskLevel, this.score, this.summary);
-        return;
-      }
-      this.phase = 'offline';
-      this.summary = this.errorMessage(error, '图片检测失败');
-    }
+    await this.recordHistory('privacy', '隐私哨兵', this.riskLevel, this.score, this.summary);
   }
 
   /** A code finding is reported once, by the on-device decoder. */
@@ -303,12 +310,23 @@ struct ShareCheckPage {
   }
 
   private async processImage(): Promise<void> {
-    if (this.imageId.length === 0) {
-      return;
-    }
     this.phase = 'processing';
     this.summary = '正在生成脱敏图片…';
     try {
+      if (this.qrReport.status === 'decoded') {
+        this.processedImageUri = await ProcessedImageService.maskLocal(
+          this.abilityContext(), this.sourceUri, this.qrReport);
+        this.processed = true;
+        this.phase = 'report';
+        this.summary = '已在端侧用不透明黑块遮挡全部二维码，未上传原图。';
+        if (this.historyRecordId.length > 0) {
+          await HistoryStore.updateProcessed(this.abilityContext(), this.historyRecordId, '已端侧遮挡全部二维码');
+        }
+        return;
+      }
+      if (this.imageId.length === 0) {
+        throw new Error('当前仅完成二维码检测；未获得可处理的远程 OCR 结果。');
+      }
       const result =
         await GuardianApi.processPrivacy(this.imageId, this.maskMode);
       const imageData = await GuardianApi.downloadProcessedImage(result.processedImageUrl);
@@ -376,7 +394,7 @@ struct ShareCheckPage {
       return;
     }
     try {
-      await ShareOutService.shareLink(this.abilityContext(), this.sourceLabel);
+      await ShareOutService.shareLink(this.abilityContext(), this.sourceText);
       await this.recordShareAction('已打开链接分享面板');
     } catch (error) {
       this.summary = this.errorMessage(error, '继续分享失败');
@@ -440,12 +458,21 @@ struct ShareCheckPage {
           riskLevel: this.toRiskLevel(item.level)
         };
       });
-      this.score = report.score;
-      this.riskLevel = this.toRiskLevel(report.verdict);
-      this.summary = `端侧引擎完成扫描：${this.sourceLabel}`;
+      let archiveNote: string = '';
+      if (/\.zip$/i.test(this.sourceLabel)) {
+        const preview: ArchivePreview = ArchiveReview.inspect(new Uint8Array(buffer), report);
+        preview.sensitiveFiles.forEach((name: string) => this.findings.push({
+          title: '压缩包含敏感文件名', evidence: name,
+          suggestion: '移除密钥、环境配置或凭据文件后再分享。', riskLevel: 'high'
+        }));
+        archiveNote = ArchiveReview.describe(preview);
+      }
+      this.score = ScanPolicy.score(this.findings);
+      this.riskLevel = ScanPolicy.risk(this.findings);
+      this.summary = archiveNote.length > 0 ? archiveNote : `端侧引擎完成扫描：${this.sourceLabel}`;
       this.suggestions = ['确认文件来源可信后再保存或打开。'];
       this.phase = 'report';
-      await this.recordHistory('doc', '提交护盾', this.riskLevel, report.score, this.summary);
+      await this.recordHistory('doc', '提交护盾', this.riskLevel, this.score, this.summary);
     } catch (error) {
       this.phase = 'report';
       this.score = 0;
@@ -461,79 +488,29 @@ struct ShareCheckPage {
   }
 
   private async runLinkRoute(url: string): Promise<void> {
-    this.sourceLabel = url;
-    this.summary = '正在对链接执行静态安全检查…';
-    try {
-      const report = await GuardianApi.checkLink(url, '分享面板');
-      this.findings = report.checks.map((item): Finding => {
-        return {
-          title: item.label,
-          evidence: item.message,
-          suggestion: report.suggestions.length > 0 ? report.suggestions[0] : '请确认链接来源后访问。',
-          riskLevel: item.riskLevel
-        };
-      });
-      this.score = report.score;
-      this.riskLevel = report.riskLevel;
-      this.summary = report.summary;
-      this.suggestions = report.suggestions;
-      this.phase = 'report';
-      await this.recordHistory('link', '链接卫士', report.riskLevel, report.score, report.summary);
-    } catch (error) {
-      // The backend is the richer engine, but the on-device rules still catch
-      // plaintext HTTP, punycode, IP literals, shorteners and risky keywords.
-      // Degrading beats leaving the user with a dead end.
-      this.fallbackReason = this.errorMessage(error, '无法连接 GuardianHub 服务');
-      const local: ScanReport = LocalRuleEngine.scanLink(url, '分享面板');
-      this.findings = local.findings;
-      this.score = local.score;
-      this.riskLevel = this.localOverallRisk(local.findings);
-      this.summary = this.localCheckNotice();
-      this.suggestions = ['端侧规则未覆盖域名信誉与跳转链路，请人工确认来源后再访问。'];
-      this.phase = 'report';
-      await this.recordHistory('link', '链接卫士', this.riskLevel, local.score, this.summary);
-    }
+    this.sourceText = url;
+    this.sourceLabel = '分享链接';
+    const local = LocalRuleEngine.scanLink(url, '分享面板');
+    this.findings = local.findings;
+    this.score = local.score;
+    this.riskLevel = this.localOverallRisk(local.findings);
+    this.summary = '本地静态检测完成 · 未上传。未查询域名信誉和跳转链路。';
+    this.suggestions = ['请人工核对来源；未命中不代表安全。'];
+    this.phase = 'report';
+    await this.recordHistory('link', '链接卫士', this.riskLevel, this.score, this.summary);
   }
 
   private async runCodeRoute(code: string): Promise<void> {
-    this.sourceLabel = '分享的代码片段';
     this.sourceText = code;
-    this.summary = '正在进行代码安全检查…';
-    try {
-      const report: CodeAnalyzeResponse =
-        await GuardianApi.analyzeCodeText(code, 'auto', 'online');
-      this.findings = report.vulnerabilities.map((item: CodeVulnerability): Finding => {
-        const location = item.filePath ?
-          `${item.filePath}${item.line ? `:${item.line}` : ''}` :
-          (item.line ? `行 ${item.line}` : '代码片段');
-        return {
-          title: item.title,
-          evidence: `${location} · ${item.reason}`,
-          suggestion: item.suggestion,
-          riskLevel: item.riskLevel
-        };
-      });
-      this.score = report.score;
-      this.riskLevel = report.riskLevel;
-      const source = report.detectorSource ?? 'rule';
-      this.summary = `${report.summary} · 来源 ${source}` +
-        (report.deepseekWarning ? `\n${report.deepseekWarning}` : '');
-      this.suggestions = report.suggestions;
-      this.phase = 'report';
-      await this.recordHistory('code', '代码卫士', report.riskLevel, report.score, this.summary);
-    } catch (error) {
-      // Fall back to the on-device rule engine so the channel keeps working
-      // without a backend, which is the whole premise of "local first".
-      this.fallbackReason = this.errorMessage(error, '无法连接 GuardianHub 服务');
-      const local: ScanReport = LocalRuleEngine.scanCode(code);
-      this.findings = local.findings;
-      this.score = local.score;
-      this.riskLevel = this.localOverallRisk(local.findings);
-      this.summary = this.localCheckNotice();
-      this.suggestions = ['端侧规则覆盖硬编码凭据、SQL 拼接、命令执行等常见问题，深度分析需联网。'];
-      this.phase = 'report';
-      await this.recordHistory('code', '代码卫士', this.riskLevel, local.score, this.summary);
-    }
+    this.sourceLabel = '分享代码';
+    const local = LocalRuleEngine.scanCode(code);
+    this.findings = local.findings;
+    this.score = local.score;
+    this.riskLevel = this.localOverallRisk(local.findings);
+    this.summary = '本地代码检测完成 · 未上传。覆盖常见静态规则，不保证发现所有漏洞。';
+    this.suggestions = ['不要执行未知代码，敏感凭据应移除并轮换。'];
+    this.phase = 'report';
+    await this.recordHistory('code', '代码卫士', this.riskLevel, this.score, this.summary);
   }
 
   /** Highest risk level across a finding list. */
@@ -721,7 +698,14 @@ struct ShareCheckPage {
           .borderRadius(14)
           .width('100%')
 
+          ProcessingModeSelector({ mode: this.mode,
+            disabled: this.phase === 'analyzing' || this.phase === 'processing',
+            onModeChange: (value: ProcessingMode) => { this.mode = value; } })
+
           if (this.route === 'image' && this.sourceUri.length > 0 && this.phase === 'report') {
+            Button('增强分析 原图将上传')
+              .enabled(this.mode !== 'local_only')
+              .onClick(() => { this.runImageRoute(this.sourceUri, true); })
             Image(this.sourceUri)
               .width('100%')
               .height(200)
@@ -734,6 +718,8 @@ struct ShareCheckPage {
           ResultPanel({
             findings: this.findings,
             score: this.score,
+            verdict: ScanPolicy.verdict(this.findings, this.phase === 'report', this.phase === 'offline'),
+            contextCopy: '来源：端侧分享拦截；联网增强每次单独授权。',
             emptyCopy: this.summary
           })
           .margin({ top: 12 })

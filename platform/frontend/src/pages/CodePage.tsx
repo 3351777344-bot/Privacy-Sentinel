@@ -124,7 +124,7 @@ export default function CodePage(props: CodePageProps) {
           <ProcessingModeSelector value={props.processingMode} onChange={props.onProcessingModeChange} />
           <p className="mode-note">
             {props.processingMode === 'local'
-              ? '本地模式：仅运行本地语言识别与安全规则，代码不会离开当前设备。'
+              ? '后端规则模式：授权后将代码或 ZIP 上传到配置的后端，不调用模型；不是浏览器离线分析。'
               : '联网模式：本地规则结果将由 DeepSeek 增强分析；未配置或调用失败时自动回退本地规则。'}
           </p>
           {props.result && (

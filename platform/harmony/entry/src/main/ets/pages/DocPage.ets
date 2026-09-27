@@ -1,6 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { picker } from '@kit.CoreFileKit';
 import { AppHeader } from '../components/AppHeader';
+import { ProcessingModeSelector } from '../components/ProcessingModeSelector';
 import { ResultPanel } from '../components/ResultPanel';
 import { SectionCard } from '../components/SectionCard';
 import { DocCheckItem, DocCheckResponse, Finding } from '../models/SecurityModels';
@@ -22,6 +23,7 @@ import {
 } from '../services/ScanReportMapper';
 import { SignatureDB } from '../services/SignatureDB';
 import { ThreatScanner } from '../services/ThreatScanner';
+import { ProcessingMode, ScanPolicy, TransferSession } from '../services/ScanPolicy';
 
 /** Upper bound for an on-device scan; keeps peak memory predictable. */
 const MAX_SCAN_BYTES: number = 12 * 1024 * 1024;
@@ -73,6 +75,9 @@ struct DocPage {
   /** Opt-in: allow a hash-only reputation lookup for suspicious files. */
   @State cloudAssist: boolean = false;
   @State cloudNote: string = '';
+  @State mode: ProcessingMode = 'hybrid';
+  @State resultMeta: string = '尚未检测';
+  @State complete: boolean = false;
   /** Pending debounced write of the brief; `-1` when idle. */
   private saveTimer: number = -1;
   /** Set once KV-Store has been read, so `onPageShow` can retry if it failed. */
@@ -183,7 +188,7 @@ struct DocPage {
     }
   }
 
-  private async scan(): Promise<void> {
+  private async scan(enhance: boolean = false): Promise<void> {
     if (this.requirementText.trim().length === 0) {
       this.statusMessage = '请先填写提交要求';
       return;
@@ -195,12 +200,16 @@ struct DocPage {
     // Snapshot the brief: everything below — and the report attribution —
     // refers to exactly this text, even if the editor changes mid-scan.
     const brief: string = this.requirementText.trim();
+    const uris: string[] = this.selectedUris.slice();
+    const names: string[] = this.selectedNames.slice();
+    const mode: ProcessingMode = this.mode;
+    const transfer = new TransferSession(mode);
     this.scanning = true;
     this.statusMessage = '正在本机检查文件类型、结构与隐私风险…';
     await this.persistRequirement(brief);
 
     try {
-      const local: LocalScanOutcome = await this.runLocalScan(brief);
+      const local: LocalScanOutcome = await this.runLocalScan(brief, uris, names);
 
       // The server pass is optional: a richer checklist when reachable, but the
       // on-device findings above already stand on their own when it is not.
@@ -210,10 +219,12 @@ struct DocPage {
       let backendParseEcho: string = '';
       let backendReachable: boolean = false;
       try {
+        if (ScanPolicy.shouldEnhance(mode, enhance)) {
         const report: DocCheckResponse = await GuardianApi.checkDocuments(
           brief,
-          this.selectedUris,
-          this.selectedNames
+          uris,
+          names,
+          transfer
         );
         const suggestion: string = report.suggestions.length > 0 ?
           report.suggestions[0] : '提交前打开每个文件进行最终复核。';
@@ -229,8 +240,10 @@ struct DocPage {
         backendSummary = report.summary;
         backendParseEcho = RequirementStore.describeParsed(report.parsedRequirements);
         backendReachable = true;
-      } catch (_) {
+        }
+      } catch (error) {
         backendReachable = false;
+        this.cloudNote = describeError(error, '增强分析未完成');
       }
 
       this.scannedCount = local.scannedFiles;
@@ -239,10 +252,12 @@ struct DocPage {
       this.localEcho = local.localEcho;
       this.reportStale = false;
       this.findings = mergeFindings(local.findings, backendFindings);
-      this.score = backendReachable ? Math.min(local.score, backendScore) : local.score;
+      this.score = ScanPolicy.score(this.findings);
+      this.complete = local.scannedFiles === uris.length;
       this.statusMessage = backendReachable
         ? `${local.summary}${backendSummary}`
-        : `${local.summary}（服务端复核不可用；命名与格式已由端内引擎判定，材料清单与文本隐私未参与）`;
+        : `${local.summary}（来源：端侧规则；材料完整文本隐私未覆盖）`;
+      this.resultMeta = `来源：端侧文件结构与命名规则；${transfer.describe()}`;
 
       await HistoryStore.add(this.abilityContext(), {
         module: 'doc',
@@ -250,7 +265,7 @@ struct DocPage {
         riskLevel: riskLevelOfScore(this.score),
         score: this.score,
         summary: this.statusMessage,
-        sourceLabel: this.selectedNames.join('、'),
+        sourceLabel: names.join('、'),
         findings: this.findings,
         suggestions: this.findings.map((item: Finding): string => item.suggestion)
       });
@@ -268,7 +283,7 @@ struct DocPage {
    * The naming/format audit needs only the names, so it is part of the local
    * pass — a correct verdict here does not depend on the server being reachable.
    */
-  private async runLocalScan(brief: string): Promise<LocalScanOutcome> {
+  private async runLocalScan(brief: string, uris: string[], names: string[]): Promise<LocalScanOutcome> {
     const context: common.UIAbilityContext = this.abilityContext();
     let engineNote: string = '';
     try {
@@ -286,15 +301,13 @@ struct DocPage {
     let maliciousFiles: number = 0;
     let suspiciousFiles: number = 0;
     let unreadableFiles: number = 0;
-    let cloudHits: number = 0;
-    let cloudQueried: number = 0;
     const blacklist = SignatureDB.current();
 
-    for (let index = 0; index < this.selectedUris.length; index++) {
-      const fileName: string = this.selectedNames[index];
+    for (let index = 0; index < uris.length; index++) {
+      const fileName: string = names[index];
       try {
         const buffer: ArrayBuffer =
-          await GuardianApi.readSelectedFile(this.selectedUris[index], MAX_SCAN_BYTES);
+          await GuardianApi.readSelectedFile(uris[index], MAX_SCAN_BYTES);
         const report: ThreatScanReport = ThreatScanner.scanFile(
           fileName,
           new Uint8Array(buffer),
@@ -309,22 +322,6 @@ struct DocPage {
           maliciousFiles++;
         } else if (report.verdict === 'suspicious') {
           suspiciousFiles++;
-          if (this.cloudAssist) {
-            cloudQueried++;
-            const query: ReputationQuery = {
-              sha256: report.sha256,
-              fileName: fileName,
-              declaredExtension: DocPage.extensionOf(fileName),
-              detectedType: report.detectedType,
-              localVerdict: report.verdict,
-              indicators: report.indicators
-            };
-            const outcome: ReputationOutcome = await ReputationClient.lookup(query);
-            if (outcome.findings.length > 0) {
-              cloudHits++;
-              appendFindings(findings, toFindingsFromThreat(outcome.findings, fileName));
-            }
-          }
         }
       } catch (error) {
         unreadableFiles++;
@@ -337,14 +334,10 @@ struct DocPage {
       }
     }
 
-    if (this.cloudAssist) {
-      this.cloudNote = `已向情报库匿名查询 ${cloudQueried} 个可疑文件的哈希，命中 ${cloudHits} 个。`;
-    }
-
     // Requirement audit: names and extensions only, nothing is uploaded. Its
     // findings enter the same list as the threat findings and, when the server
     // is unreachable, they are the only thing that moves the score.
-    const audit: RequirementAudit = auditRequirement(brief, this.selectedNames);
+    const audit: RequirementAudit = auditRequirement(brief, names);
     if (audit.findings.length > 0) {
       appendFindings(findings, audit.findings);
       const auditScore: number = scoreForFindings(audit.findings);
@@ -449,34 +442,14 @@ struct DocPage {
               .width('100%')
             }
 
-            Row() {
-              Column() {
-                Text('可疑文件允许匿名云端复核')
-                  .fontSize(13)
-                  .fontColor('#172033')
-                  .width('100%')
-                Text('仅上传文件哈希与其中的域名，绝不上传文件本身')
-                  .fontSize(11)
-                  .fontColor('#94A3B8')
-                  .lineHeight(17)
-                  .margin({ top: 2 })
-                  .width('100%')
-              }
-              .alignItems(HorizontalAlign.Start)
-              .layoutWeight(1)
+            ProcessingModeSelector({ mode: this.mode, disabled: this.scanning,
+              onModeChange: (value: ProcessingMode) => { this.mode = value; } })
 
-              Toggle({ type: ToggleType.Switch, isOn: this.cloudAssist })
-                .selectedColor('#EA7C24')
-                .onChange((isOn: boolean) => {
-                  this.cloudAssist = isOn;
-                })
+            if (this.mode !== 'local_only') {
+              Button('增强分析 · 本次授权后上传所选非压缩材料')
+                .enabled(!this.scanning)
+                .onClick(() => { this.scan(true); })
             }
-            .width('100%')
-            .alignItems(VerticalAlign.Center)
-            .padding(11)
-            .backgroundColor('#F8FAFC')
-            .borderRadius(12)
-            .margin({ top: 12 })
 
             Button(this.scanning ? '检查中…' : '开始提交前检查')
               .enabled(!this.scanning)
@@ -579,6 +552,8 @@ struct DocPage {
           ResultPanel({
             findings: this.findings,
             score: this.score,
+            verdict: ScanPolicy.verdict(this.findings, this.complete),
+            contextCopy: this.resultMeta,
             emptyCopy: '检查材料缺失、格式、命名、文件结构与隐私风险。'
           })
           .margin({ top: 12 })

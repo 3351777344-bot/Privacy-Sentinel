@@ -269,7 +269,7 @@ def _detect_vision_api(
             fallback_message = "Qwen VL API 调用失败，已回退到本地 OCR 检测。"
         else:
             fallback_message = (
-                "Qwen VL 未启用（默认关闭），本次为纯本机 OCR 检测，图像未离开设备。"
+                "Qwen VL 未启用，本次仅执行后端 OCR；图像已上传到后端，未发送给外部模型。"
             )
         return base_result.model_copy(
             update={
@@ -348,8 +348,8 @@ def _detect_hybrid(
             "Qwen VL 未启用，未进行联网图像分析。"
         )
         detector_message = (
-            f"纯本机分析（未联网）：OCR={settings.ocr_engine}，QR={settings.qr_engine}，"
-            f"face={settings.face_engine}。Qwen VL 未启用（默认关闭），图像未离开设备。"
+            f"后端规则分析：OCR={settings.ocr_engine}，QR={settings.qr_engine}，"
+            f"face={settings.face_engine}。Qwen VL 未启用；图像已上传到后端，未发送给外部模型。"
         )
     return DetectResponse(
         imageId=image_id,

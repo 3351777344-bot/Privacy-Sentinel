@@ -270,12 +270,15 @@ def health() -> dict[str, str]:
 
 @app.post("/api/detect", response_model=DetectResponse)
 async def detect(
+    request: Request,
     file: UploadFile = File(...),
     processing_mode: str = Form(default="local"),
 ) -> DetectResponse:
     _cleanup_expired_files()
     if processing_mode not in {"local", "online"}:
         raise HTTPException(status_code=400, detail="处理模式仅支持 local 或 online。")
+    if processing_mode == "online" and request.headers.get("X-Guardian-Consent") != "explicit":
+        raise HTTPException(status_code=403, detail="联网模型分析需要本次明确授权。")
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="请上传图片文件。")
 
@@ -439,6 +442,9 @@ async def analyze_code(request: Request) -> CodeAnalyzeResponse:
     if processing_mode not in {"local", "online"}:
         raise HTTPException(status_code=400, detail="处理模式仅支持 local 或 online。")
 
+    if processing_mode == "online" and request.headers.get("X-Guardian-Consent") != "explicit":
+        raise HTTPException(status_code=403, detail="联网模型分析需要本次明确授权。")
+
     if archive_content is not None:
         try:
             result_data = await asyncio.to_thread(
@@ -566,7 +572,9 @@ def doc_reputation(payload: DocReputationRequest) -> DocReputationResponse:
         if entry is not None:
             known = True
             family = entry.get("family")
-            confidence = 95
+            confidence = int(entry.get("confidence", "95"))
+            if confidence < 80:
+                notes.append("低置信度情报，需人工判断；不能单凭此记录判定恶意。")
             if entry.get("note"):
                 notes.append(entry["note"])
             if entry.get("source"):
@@ -625,7 +633,9 @@ def export_image(image_id: str) -> FileResponse:
 
 
 @app.post("/api/code/fix", response_model=CodeFixResponse)
-def fix_code(request: CodeFixRequest) -> CodeFixResponse:
+def fix_code(request: CodeFixRequest, http_request: Request) -> CodeFixResponse:
+    if http_request.headers.get("X-Guardian-Consent") != "explicit":
+        raise HTTPException(status_code=403, detail="联网模型分析需要本次明确授权。")
     from openai import OpenAI
 
     if not settings.deepseek_enabled or not settings.deepseek_api_key:
@@ -688,7 +698,7 @@ Code to fix ({request.language}):
         raise
     except Exception as exc:
         logger.exception("DeepSeek code fix failed")
-        raise HTTPException(status_code=502, detail=f"代码修复失败：{exc}")
+        raise HTTPException(status_code=502, detail="代码修复服务暂不可用，请稍后手动重试。")
 
 
 @app.post("/api/export/code")

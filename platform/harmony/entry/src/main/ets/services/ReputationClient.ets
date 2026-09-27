@@ -14,6 +14,7 @@
 import { http } from '@kit.NetworkKit';
 import { ThreatFinding } from '../models/ThreatModels';
 import { API_BASE_URL } from './GuardianApi';
+import { NetworkConsent } from './NetworkConsent';
 
 /** One file's metadata, matched by `DocReputationQuery` on the server. */
 export interface ReputationQuery {
@@ -72,9 +73,10 @@ export class ReputationClient {
 
     const request = http.createHttp();
     try {
+      await NetworkConsent.require('仅发送文件 SHA256 与本地风险等级，不发送原文、文件名或 URL 参数。');
       const response = await request.request(`${API_BASE_URL}/api/doc/reputation`, {
         method: http.RequestMethod.POST,
-        header: { 'Content-Type': 'application/json' },
+        header: { 'Content-Type': 'application/json', 'X-Guardian-Consent': 'explicit' },
         extraData: JSON.stringify({ files: [ReputationClient.toPayload(query)] }),
         expectDataType: http.HttpDataType.STRING,
         connectTimeout: 8000,
@@ -105,11 +107,8 @@ export class ReputationClient {
     const payload: ReputationPayload = {
       sha256: query.sha256,
       localVerdict: query.localVerdict,
-      indicators: indicators
+      indicators: []
     };
-    if (query.fileName !== undefined) {
-      payload.fileName = query.fileName;
-    }
     if (query.declaredExtension !== undefined) {
       payload.declaredExtension = query.declaredExtension;
     }

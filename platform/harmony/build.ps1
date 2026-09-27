@@ -1,36 +1,51 @@
 param(
-  [ValidateSet('debug', 'release')]
-  [string]$BuildMode = 'debug'
+  [ValidateSet('debug', 'release')][string]$BuildMode = 'debug',
+  [string]$DevEcoHome = $env:DEVECO_HOME,
+  [string]$ApiBaseUrl = $env:GUARDIANHUB_API_BASE_URL
 )
-
 $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
-$npmCache = Join-Path $projectRoot '.cache\npm'
-New-Item -ItemType Directory -Force -Path $npmCache | Out-Null
-
-# DevEco Studio bundles its own Node.js. Isolating npm's cache here avoids
-# depending on a machine-wide npm cache path or its permissions.
-$env:NPM_CONFIG_CACHE = $npmCache
-$env:npm_config_cache = $npmCache
-
-$cliCommand = Get-Command 'devecocli.cmd' -ErrorAction SilentlyContinue
-if ($null -ne $cliCommand) {
-  $cliPath = $cliCommand.Source
-} else {
-  $cliPath = Join-Path $env:LOCALAPPDATA 'Programs\deveco-cli\devecocli.cmd'
+if (-not $DevEcoHome) {
+  $properties = Join-Path $projectRoot 'local.properties'
+  if (Test-Path -LiteralPath $properties) {
+    $line = Get-Content -LiteralPath $properties | Where-Object { $_ -match '^sdk.dir=' } | Select-Object -First 1
+    if ($line) { $DevEcoHome = Split-Path -Parent ($line -replace '^sdk.dir=', '') }
+  }
 }
-
-if (-not (Test-Path -LiteralPath $cliPath -PathType Leaf)) {
-  throw 'DevEco CLI was not found. Install it or add devecocli.cmd to PATH.'
+$profile = Join-Path $projectRoot 'build-profile.json5'
+$localProfile = Join-Path $projectRoot 'build-profile.local.json5'
+$config = Join-Path $projectRoot 'entry/src/main/ets/services/ApiConfig.ets'
+$oldProfile = [IO.File]::ReadAllBytes($profile)
+$oldConfig = [IO.File]::ReadAllBytes($config)
+if ($BuildMode -eq 'release') {
+  if ($ApiBaseUrl -notmatch '^https://[a-zA-Z0-9.-]+(?::[0-9]+)?/?$') {
+    throw 'Release requires GUARDIANHUB_API_BASE_URL with an HTTPS origin.'
+  }
+  if (-not (Test-Path -LiteralPath $localProfile)) {
+    throw 'Release requires an untracked build-profile.local.json5 with rotated signing credentials.'
+  }
 }
-
 Push-Location $projectRoot
 try {
-  & $cliPath build `
-    --product default `
-    --modules entry@default `
-    --build-mode $BuildMode
-  exit $LASTEXITCODE
+  if ($BuildMode -eq 'release') { Copy-Item -LiteralPath $localProfile -Destination $profile }
+  if ($ApiBaseUrl) {
+    if ($ApiBaseUrl -notmatch '^https?://[a-zA-Z0-9.-]+(?::[0-9]+)?/?$') { throw 'Invalid API origin.' }
+    [IO.File]::WriteAllText($config, "export const API_BASE_URL: string = '$($ApiBaseUrl.TrimEnd('/'))';")
+  }
+  $cli = Get-Command 'devecocli.cmd' -ErrorAction SilentlyContinue
+  if ($cli) {
+    & $cli.Source build --product default --modules entry@default --build-mode $BuildMode
+  } elseif ($DevEcoHome -and (Test-Path -LiteralPath (Join-Path $DevEcoHome 'tools/hvigor/bin/hvigorw.js'))) {
+    $env:DEVECO_SDK_HOME = Join-Path $DevEcoHome 'sdk'
+    & (Join-Path $DevEcoHome 'tools/node/node.exe') (Join-Path $DevEcoHome 'tools/hvigor/bin/hvigorw.js') --mode module -p product=default -p module=entry@default -p "buildMode=$BuildMode" assembleHap --no-daemon
+  } else { throw 'Install DevEco CLI or set DEVECO_HOME to the DevEco Studio installation.' }
+  if ($LASTEXITCODE -ne 0) { throw "Harmony build failed ($LASTEXITCODE)." }
+  $hapName = if ($BuildMode -eq 'release') { 'entry-default-signed.hap' } else { 'entry-default-unsigned.hap' }
+  $hap = Join-Path $projectRoot "entry/build/default/outputs/default/$hapName"
+  if (-not (Test-Path -LiteralPath $hap)) { throw "Expected artifact missing: $hapName" }
+  Get-FileHash -LiteralPath $hap -Algorithm SHA256
 } finally {
+  [IO.File]::WriteAllBytes($profile, $oldProfile)
+  [IO.File]::WriteAllBytes($config, $oldConfig)
   Pop-Location
 }

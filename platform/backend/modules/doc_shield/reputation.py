@@ -8,16 +8,18 @@ boundary is strict and enforced here, not just by convention:
   never file content;
 * nothing in a request is persisted — no query log, no digest cache.
 
-The feed itself is operator-supplied. Point ``data/threat_feed.csv`` at a
-signed feed (``sha256,family,firstSeen,source``) and ``data/threat_iocs.txt`` at
-a newline-separated list of known-bad domains/addresses/URLs. When neither
-exists the service answers honestly — everything is reported as unknown rather
-than inventing a verdict.
+Production entries come only from ``data/threat_feed.signed.json`` verified
+against an operator-pinned Ed25519 key. Unsigned legacy CSV/IoC files are ignored.
+Unknown hashes are reported as unknown; the built-in EICAR vector is test-only.
 """
 
 from __future__ import annotations
 
 import threading
+import os
+import base64
+from datetime import datetime, timezone
+from .signed_feed import verify
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set
 
@@ -68,11 +70,12 @@ class ThreatFeed:
         self._entries: int = len(self._hashes)
         self._stamp: Optional[float] = None
         self._lock = threading.Lock()
+        self._expires_at: Optional[datetime] = None
 
     # ------------------------------------------------------------- loading
     def _stat_signature(self) -> Optional[float]:
         stamps: List[float] = []
-        for path in (FEED_FILE, IOC_FILE):
+        for path in (DATA_DIR / 'threat_feed.signed.json',):
             try:
                 stamps.append(path.stat().st_mtime)
             except OSError:
@@ -87,35 +90,23 @@ class ThreatFeed:
         version = "builtin"
 
         try:
-            with FEED_FILE.open("r", encoding="utf-8") as handle:
-                for raw_line in handle:
-                    line = raw_line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    fields = [part.strip() for part in line.split(",")]
-                    digest = _normalise_hash(fields[0])
-                    if not digest:
-                        continue
-                    hashes[digest] = {
-                        "family": fields[1] if len(fields) > 1 and fields[1] else "已知恶意样本",
-                        "firstSeen": fields[2] if len(fields) > 2 else "",
-                        "source": fields[3] if len(fields) > 3 and fields[3] else "feed",
+            key_text = os.environ.get("GUARDIANHUB_FEED_PUBLIC_KEY", "")
+            if key_text:
+                payload = verify((DATA_DIR / "threat_feed.signed.json").read_bytes(),
+                                 base64.b64decode(key_text, validate=True))
+                for entry in payload["entries"]:
+                    hashes[entry["indicator"]] = {
+                        "family": entry.get("family", entry["verdict"]),
+                        "firstSeen": entry.get("first_seen", ""),
+                        "source": entry["source"],
+                        "confidence": str(round(entry["confidence"] * 100)),
                     }
-            version = f"feed:{FEED_FILE.name}"
-        except OSError:
-            pass
-
-        try:
-            with IOC_FILE.open("r", encoding="utf-8") as handle:
-                for raw_line in handle:
-                    indicator = _normalise_indicator(raw_line)
-                    if not indicator or indicator.startswith("#"):
-                        continue
-                    iocs.add(indicator)
-            if version == "builtin":
-                version = f"feed:{IOC_FILE.name}"
-        except OSError:
-            pass
+                version = f'signed:{payload["version"]}'
+                self._expires_at = datetime.fromisoformat(payload['expires_at'])
+        except Exception:
+            # Reject a failed update while keeping the last valid in-memory feed.
+            if self._expires_at and self._expires_at > datetime.now(timezone.utc):
+                return
 
         self._hashes = hashes
         self._iocs = iocs
@@ -127,7 +118,7 @@ class ThreatFeed:
         with self._lock:
             if stamp is None and self._stamp is None:
                 return
-            if stamp != self._stamp:
+            if stamp != self._stamp or (self._expires_at and self._expires_at <= datetime.now(timezone.utc)):
                 self._reload()
                 self._stamp = stamp
 

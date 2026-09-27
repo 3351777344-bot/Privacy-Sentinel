@@ -1,72 +1,36 @@
-export type ProcessingMode = 'local' | 'online';
+import { ProcessingMode } from '../services/ScanPolicy';
+export { ProcessingMode } from '../services/ScanPolicy';
 
 @Component
 export struct ProcessingModeSelector {
-  @Prop mode: ProcessingMode = 'local';
-  @Prop onlineHint: string = '调用已配置的模型服务';
-  onModeChange: (mode: ProcessingMode) => void = (_mode: ProcessingMode) => {
-  };
+  @Prop mode: ProcessingMode = 'hybrid';
+  @Prop onlineHint: string = '本地完成后逐次授权增强';
+  @Prop disabled: boolean = false;
+  onModeChange: (mode: ProcessingMode) => void = (_mode: ProcessingMode) => {};
+
+  private label(mode: ProcessingMode): string {
+    if (mode === 'local_only') { return '仅本地'; }
+    return mode === 'hybrid' ? '本地优先' : '联网分析';
+  }
 
   build() {
     Column() {
-      Text('处理模式')
-        .fontSize(12)
-        .fontWeight(FontWeight.Medium)
-        .fontColor('#475569')
-        .width('100%')
-
       Row() {
-        Button() {
-          Column() {
-            Text('本地优先')
-              .fontSize(13)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(this.mode === 'local' ? '#FFFFFF' : '#334155')
-            Text('本机规则 / OCR')
-              .fontSize(10)
-              .fontColor(this.mode === 'local' ? '#DBEAFE' : '#94A3B8')
-              .margin({ top: 2 })
-          }
-          .alignItems(HorizontalAlign.Start)
-          .width('100%')
-        }
-        .layoutWeight(1)
-        .height(54)
-        .padding({ left: 12, right: 12 })
-        .backgroundColor(this.mode === 'local' ? '#2563EB' : '#F1F5F9')
-        .borderRadius(12)
-        .margin({ right: 8 })
-        .onClick(() => {
-          this.onModeChange('local');
+        ForEach(['local_only', 'hybrid', 'online'], (mode: ProcessingMode) => {
+          Button(this.label(mode))
+            .layoutWeight(1)
+            .height(42)
+            .fontSize(12)
+            .fontColor(this.mode === mode ? '#FFFFFF' : '#334155')
+            .backgroundColor(this.mode === mode ? '#2563EB' : '#F1F5F9')
+            .enabled(!this.disabled)
+            .onClick(() => { this.onModeChange(mode); })
         })
-
-        Button() {
-          Column() {
-            Text('联网增强')
-              .fontSize(13)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(this.mode === 'online' ? '#FFFFFF' : '#334155')
-            Text(this.onlineHint)
-              .fontSize(10)
-              .fontColor(this.mode === 'online' ? '#DBEAFE' : '#94A3B8')
-              .margin({ top: 2 })
-          }
-          .alignItems(HorizontalAlign.Start)
-          .width('100%')
-        }
-        .layoutWeight(1)
-        .height(54)
-        .padding({ left: 12, right: 12 })
-        .backgroundColor(this.mode === 'online' ? '#0F766E' : '#F1F5F9')
-        .borderRadius(12)
-        .onClick(() => {
-          this.onModeChange('online');
-        })
-      }
-      .width('100%')
-      .margin({ top: 8 })
-    }
-    .alignItems(HorizontalAlign.Start)
-    .width('100%')
+      }.width('100%')
+      Text(this.mode === 'local_only' ? '禁止网络分析；仅使用端侧能力。' :
+        (this.mode === 'hybrid' ? '先完成本地检测，主动点击增强后才请求本次授权。' :
+          '先执行本地检查，再请求本次上传授权；拒绝后保留本地结果。'))
+        .fontSize(12).fontColor('#64748B').margin({ top: 8 }).width('100%')
+    }.width('100%')
   }
 }

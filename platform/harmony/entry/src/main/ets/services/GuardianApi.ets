@@ -1,203 +1,105 @@
 import { fileIo } from '@kit.CoreFileKit';
 import { http } from '@kit.NetworkKit';
-import {
-  CodeAnalyzeResponse,
-  DetectResponse,
-  DocCheckResponse,
-  LinkCheckResponse,
-  PrivacyProcessResponse,
-  QrDecodeResponse
-} from '../models/SecurityModels';
-
-// Backend address for the HarmonyOS client.
-//
-// 10.0.2.2 is the DevEco emulator's alias for the development computer, so this
-// value ONLY works on an emulator with the backend running locally. A real
-// device (and therefore any judge installation) resolves 10.0.2.2 to nothing.
-//
-// Before producing a submission HAP, replace this with the public HTTPS address
-// of the deployed backend and rebuild — the value is compiled into the HAP, so
-// shipping the emulator address silently leaves the image/link channels unable
-// to reach any service.
-export const API_BASE_URL: string = 'http://10.0.2.2:8001';
-
-interface ApiErrorEnvelope {
-  detail?: string;
-}
+import { NetworkConsent } from './NetworkConsent';
+import { API_BASE_URL } from './ApiConfig';
+import { ProcessingMode, TransferSession } from './ScanPolicy';
+import { ArchiveReview } from './ArchiveReview';
+import { ThreatScanner } from './ThreatScanner';
+import { CodeAnalyzeResponse, DetectResponse, DocCheckResponse, LinkCheckResponse, PrivacyProcessResponse } from '../models/SecurityModels';
+export { API_BASE_URL } from './ApiConfig';
 
 export class GuardianApi {
-  private static async send<T>(path: string, options: http.HttpRequestOptions): Promise<T> {
-    const request = http.createHttp();
-    try {
-      options.expectDataType = http.HttpDataType.STRING;
-      options.connectTimeout = 15000;
-      options.readTimeout = 60000;
-      const response = await request.request(`${API_BASE_URL}${path}`, options);
-      const responseText = response.result as string;
-      if (response.responseCode < 200 || response.responseCode >= 300) {
-        let detail = `服务返回 ${response.responseCode}`;
+  private static async send<T>(path: string, options: http.HttpRequestOptions,
+    transfer: TransferSession, disclosure: string): Promise<T> {
+    return transfer.run<T>(
+      async (): Promise<void> => { await NetworkConsent.require(`${disclosure}\n目的地址：${API_BASE_URL}`); },
+      async (): Promise<T> => {
+        const request = http.createHttp();
         try {
-          const errorBody = JSON.parse(responseText) as ApiErrorEnvelope;
-          detail = errorBody.detail ?? detail;
-        } catch (_) {
-        }
-        throw new Error(detail);
+          const headers = options.header as Record<string, string>;
+          headers['X-Guardian-Consent'] = 'explicit';
+          options.header = headers;
+          options.expectDataType = http.HttpDataType.STRING;
+          options.connectTimeout = 15000;
+          options.readTimeout = 60000;
+          const response = await request.request(`${API_BASE_URL}${path}`, options);
+          if (response.responseCode < 200 || response.responseCode >= 300) {
+            throw new Error('分析结果未完成。');
+          }
+          return JSON.parse(response.result as string) as T;
+        } finally { request.destroy(); }
       }
-      return JSON.parse(responseText) as T;
-    } catch (error) {
-      const typedError = error as Error;
-      throw new Error(typedError.message || '无法连接 GuardianHub 服务。');
-    } finally {
-      request.destroy();
-    }
+    );
   }
 
   static analyzeCodeText(code: string, language: string,
-    processingMode: string = 'local'): Promise<CodeAnalyzeResponse> {
+    mode: ProcessingMode = 'hybrid', transfer: TransferSession = new TransferSession(mode),
+    disclosure: string = '发送输入代码文本用于增强分析，可能包含凭据，请先移除。'): Promise<CodeAnalyzeResponse> {
     return GuardianApi.send<CodeAnalyzeResponse>('/api/code/analyze', {
-      method: http.RequestMethod.POST,
-      header: {
-        'Content-Type': 'application/json'
-      },
-      extraData: JSON.stringify({
-        language: language,
-        code: code,
-        processingMode: processingMode
-      })
-    });
+      method: http.RequestMethod.POST, header: { 'Content-Type': 'application/json' },
+      extraData: JSON.stringify({ language: language, code: code, processingMode: 'online' })
+    }, transfer, disclosure);
   }
 
-  static async analyzeCodeArchive(fileUri: string, fileName: string,
-    processingMode: string = 'local'): Promise<CodeAnalyzeResponse> {
-    const fileData = await GuardianApi.readSelectedFile(fileUri, 10 * 1024 * 1024);
-    return GuardianApi.send<CodeAnalyzeResponse>('/api/code/analyze', {
-      method: http.RequestMethod.POST,
-      header: {
-        'Content-Type': 'multipart/form-data'
-      },
-      multiFormDataList: [
-        {
-          name: 'processing_mode',
-          contentType: 'text/plain',
-          data: processingMode
-        },
-        {
-          name: 'file',
-          contentType: 'application/zip',
-          remoteFileName: fileName,
-          data: fileData
-        }
-      ]
-    });
+  static async analyzeCodeArchive(uri: string, name: string,
+    mode: ProcessingMode = 'hybrid', transfer: TransferSession = new TransferSession(mode)): Promise<CodeAnalyzeResponse> {
+    const bytes = new Uint8Array(await GuardianApi.readSelectedFile(uri, 10 * 1024 * 1024));
+    const report = ThreatScanner.scanFile(name, bytes);
+    const preview = ArchiveReview.inspect(bytes, report);
+    if (!preview.canEnhance) { throw new Error('压缩包结构无效或条目过多，仅保留本地结果。'); }
+    return GuardianApi.analyzeCodeText(preview.summary, 'auto', mode, transfer,
+      ArchiveReview.describe(preview) + '\n模型仅解释静态摘要，不会进行源码审计。');
   }
 
-  static checkLink(url: string, source: string): Promise<LinkCheckResponse> {
+  static checkLink(url: string, source: string,
+    transfer: TransferSession = new TransferSession()): Promise<LinkCheckResponse> {
     return GuardianApi.send<LinkCheckResponse>('/api/link/check', {
-      method: http.RequestMethod.POST,
-      header: {
-        'Content-Type': 'application/json'
-      },
-      extraData: JSON.stringify({
-        url: url,
-        source: source
-      })
-    });
+      method: http.RequestMethod.POST, header: { 'Content-Type': 'application/json' },
+      extraData: JSON.stringify({ url: url, source: source })
+    }, transfer, '发送完整链接及来源文本用于静态增强检查；链接参数可能包含私人信息。');
   }
 
-  static async decodeQr(fileUri: string, fileName: string): Promise<QrDecodeResponse> {
-    const fileData = await GuardianApi.readSelectedFile(fileUri, 10 * 1024 * 1024);
-    return GuardianApi.send<QrDecodeResponse>('/api/link/qr/decode', {
-      method: http.RequestMethod.POST,
-      header: {
-        'Content-Type': 'multipart/form-data'
-      },
-      multiFormDataList: [
-        {
-          name: 'file',
-          contentType: GuardianApi.imageContentType(fileName),
-          remoteFileName: fileName,
-          data: fileData
-        }
-      ]
-    });
-  }
-
-  static async checkDocuments(requirementText: string, fileUris: string[],
-    fileNames: string[]): Promise<DocCheckResponse> {
-    const formData: http.MultiFormData[] = [
-      {
-        name: 'requirement_text',
-        contentType: 'text/plain; charset=utf-8',
-        data: requirementText
-      }
-    ];
-    for (let index = 0; index < fileUris.length; index++) {
-      const fileData = await GuardianApi.readSelectedFile(fileUris[index], 10 * 1024 * 1024);
-      formData.push({
-        name: 'files',
-        contentType: GuardianApi.documentContentType(fileNames[index]),
-        remoteFileName: fileNames[index],
-        data: fileData
-      });
+  static async checkDocuments(requirement: string, uris: string[], names: string[],
+    transfer: TransferSession = new TransferSession()): Promise<DocCheckResponse> {
+    if (names.some((name: string): boolean => /\.(zip|rar|7z)$/i.test(name))) {
+      throw new Error('不上传原始压缩包。请在代码页使用ZIP摘要增强；其他材料可单独选择。');
+    }
+    const form: http.MultiFormData[] = [{ name: 'requirement_text', contentType: 'text/plain', data: requirement }];
+    let bytes = 0;
+    for (let index = 0; index < uris.length; index++) {
+      const data = await GuardianApi.readSelectedFile(uris[index], 10 * 1024 * 1024);
+      bytes += data.byteLength;
+      if (bytes > 30 * 1024 * 1024) { throw new Error('增强材料总量超过30 MB，请分批选择。'); }
+      form.push({ name: 'files', contentType: GuardianApi.documentContentType(names[index]),
+        remoteFileName: names[index], data: data });
     }
     return GuardianApi.send<DocCheckResponse>('/api/doc/check', {
-      method: http.RequestMethod.POST,
-      header: {
-        'Content-Type': 'multipart/form-data'
-      },
-      multiFormDataList: formData
-    });
+      method: http.RequestMethod.POST, header: { 'Content-Type': 'multipart/form-data' }, multiFormDataList: form
+    }, transfer, `发送 ${uris.length} 个原始文档、文件名和提交要求，共 ${bytes} 字节。`);
   }
 
-  static async detectPrivacy(fileUri: string, fileName: string,
-    processingMode: string = 'local'): Promise<DetectResponse> {
-    const fileData = await GuardianApi.readSelectedFile(fileUri, 10 * 1024 * 1024);
-    return GuardianApi.detectPrivacyData(fileData, fileName, processingMode);
-  }
-
-  static async detectPrivacyDemo(processingMode: string = 'local'): Promise<DetectResponse> {
-    const fileName = 'privacy_sentinel_demo_qr.png';
-    const fileData =
-      await GuardianApi.downloadProcessedImage('/static/samples/privacy_sentinel_demo_qr.png');
-    return GuardianApi.detectPrivacyData(fileData, fileName, processingMode);
-  }
-
-  private static detectPrivacyData(fileData: ArrayBuffer, fileName: string,
-    processingMode: string = 'local'): Promise<DetectResponse> {
+  static async detectPrivacy(uri: string, name: string, mode: ProcessingMode = 'hybrid',
+    transfer: TransferSession = new TransferSession(mode)): Promise<DetectResponse> {
+    const data = await GuardianApi.readSelectedFile(uri, 10 * 1024 * 1024);
     return GuardianApi.send<DetectResponse>('/api/detect', {
-      method: http.RequestMethod.POST,
-      header: {
-        'Content-Type': 'multipart/form-data'
-      },
+      method: http.RequestMethod.POST, header: { 'Content-Type': 'multipart/form-data' },
       multiFormDataList: [
-        {
-          name: 'processing_mode',
-          contentType: 'text/plain',
-          data: processingMode
-        },
-        {
-          name: 'file',
-          contentType: GuardianApi.imageContentType(fileName),
-          remoteFileName: fileName,
-          data: fileData
-        }
+        { name: 'processing_mode', contentType: 'text/plain', data: 'online' },
+        { name: 'file', contentType: GuardianApi.imageContentType(name), remoteFileName: 'image' + name.substring(name.lastIndexOf('.')), data: data }
       ]
-    });
+    }, transfer, `发送原图用于OCR与模型增强，共 ${data.byteLength} 字节。文字和人物等内容也会一并上传。`);
   }
 
-  static processPrivacy(imageId: string, maskType: string): Promise<PrivacyProcessResponse> {
+  static async detectPrivacyDemo(mode: ProcessingMode = 'hybrid'): Promise<DetectResponse> {
+    throw new Error('演示请使用本地合成样本，从文件或相册选择。');
+  }
+
+  static processPrivacy(imageId: string, maskType: string,
+    transfer: TransferSession = new TransferSession()): Promise<PrivacyProcessResponse> {
     return GuardianApi.send<PrivacyProcessResponse>('/api/privacy/process', {
-      method: http.RequestMethod.POST,
-      header: {
-        'Content-Type': 'application/json'
-      },
-      extraData: JSON.stringify({
-        imageId: imageId,
-        scope: 'all',
-        maskType: maskType,
-        itemIds: []
-      })
-    });
+      method: http.RequestMethod.POST, header: { 'Content-Type': 'application/json' },
+      extraData: JSON.stringify({ imageId: imageId, scope: 'all', maskType: maskType, itemIds: [] })
+    }, transfer, '发送已上传图片的记录编号与遮挡方式，不重新上传原图。');
   }
 
   static async downloadProcessedImage(path: string): Promise<ArrayBuffer> {
