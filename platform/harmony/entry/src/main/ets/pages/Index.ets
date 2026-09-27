@@ -96,7 +96,7 @@ struct Index {
               Text('联网可选')
                 .fontSize(11)
                 .fontColor('#FFFFFF')
-              Text('四模块统一')
+              Text('风险可解释')
                 .fontSize(11)
                 .fontColor('#FFFFFF')
             }

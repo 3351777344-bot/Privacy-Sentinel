@@ -120,7 +120,12 @@ struct DocPage {
     }
     this.requirementLoaded = true;
     this.requirementText = stored;
-    this.hint = precheck(stored);
+    // Only pre-check a brief that has content. Pre-checking an empty store used
+    // to greet a first-time visitor with "提交要求为空" before they had typed
+    // anything, which reads as a reprimand on arrival.
+    if (stored.trim().length > 0) {
+      this.hint = precheck(stored);
+    }
   }
 
   /**
@@ -376,8 +381,8 @@ struct DocPage {
   build() {
     Column() {
       AppHeader({
-        title: 'Doc Shield',
-        subtitle: '材料上传前完整性检查'
+        title: '提交护盾',
+        subtitle: 'Doc Shield · 材料上传前完整性检查'
       })
 
       Scroll() {
@@ -443,7 +448,9 @@ struct DocPage {
             }
 
             ProcessingModeSelector({ mode: this.mode, disabled: this.scanning,
+              accentColor: '#EA7C24',
               onModeChange: (value: ProcessingMode) => { this.mode = value; } })
+              .margin({ top: 12 })
 
             Button(this.scanning ? '检查中…' : '开始提交前检查')
               .enabled(!this.scanning)

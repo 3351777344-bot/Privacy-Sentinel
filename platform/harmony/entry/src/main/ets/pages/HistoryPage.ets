@@ -226,8 +226,8 @@ struct HistoryPage {
                       .fontWeight(FontWeight.Bold)
                       .fontColor('#172033')
                     Text(this.formatTime(record.createdAt))
-                      .fontSize(10)
-                      .fontColor('#94A3B8')
+                      .fontSize(12)
+                      .fontColor('#64748B')
                       .margin({ top: 4 })
                   }
                   .alignItems(HorizontalAlign.Start)

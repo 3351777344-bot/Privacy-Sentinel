@@ -27,7 +27,7 @@ struct CodePage {
   @State archiveStatus: string = '尚未选择项目包';
   @State scanningArchive: boolean = false;
   @State scanningSnippet: boolean = false;
-  @State snippetStatus: string = '默认端侧扫描，不上传；联网模式会发送代码片段进行增强分析。';
+  @State snippetStatus: string = '尚未检测';
   @State processingMode: ProcessingMode = 'local_only';
 
   @State resultMeta: string = '尚未检测';
@@ -164,30 +164,16 @@ struct CodePage {
   build() {
     Column() {
       AppHeader({
-        title: 'Code Guardian',
-        subtitle: '代码提交前安全检查'
+        title: '代码卫士',
+        subtitle: 'Code Guardian · 代码提交前安全检查'
       })
 
       Scroll() {
         Column() {
-          SectionCard({
-            title: '处理模式',
-            copy: '默认端侧扫描。ZIP增强仅发送计数、规则编号与结论，不发送原包和源码。'
-          }) {
-            ProcessingModeSelector({
-              mode: this.processingMode,
-              disabled: this.scanningSnippet || this.scanningArchive,
-              onlineHint: 'DeepSeek 增强',
-              onModeChange: (mode: ProcessingMode) => {
-                this.processingMode = mode;
-              }
-            })
-          }
-
           Column() {
             SectionCard({
               title: '01 输入代码片段',
-              copy: '联网增强会在本地规则基础上调用 DeepSeek，失败时自动回退本地结果。'
+              copy: '粘贴或输入待提交的代码片段。'
             }) {
               TextArea({
                 text: this.codeText,
@@ -210,8 +196,19 @@ struct CodePage {
                 .margin({ top: 10 })
                 .width('100%')
 
+              ProcessingModeSelector({
+                mode: this.processingMode,
+                disabled: this.scanningSnippet || this.scanningArchive,
+                accentColor: '#7C3AED',
+                onlineHint: '联网增强会把代码片段发送至服务端补充分析；失败时自动回退本地规则结果。',
+                onModeChange: (mode: ProcessingMode) => {
+                  this.processingMode = mode;
+                }
+              })
+                .margin({ top: 12 })
+
               Button(this.scanningSnippet ? '检测中…' :
-                (this.processingMode === 'online' ? '开始 DeepSeek 增强检测' : '开始本地代码检测'))
+                (this.processingMode === 'online' ? '开始联网增强检测' : '开始本地代码检测'))
                 .enabled(!this.scanningSnippet)
                 .width('100%')
                 .height(46)

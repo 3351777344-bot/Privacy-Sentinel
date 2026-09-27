@@ -119,7 +119,7 @@ struct LinkPage {
 
   build() {
     Column() {
-      AppHeader({ title: 'Link Guard', subtitle: '点击前静态安全体检' })
+      AppHeader({ title: '链接卫士', subtitle: 'Link Guard · 点击前静态安全体检' })
       Scroll() {
         Column() {
           SectionCard({ title: '01 输入链接与来源', copy: '二维码完整载荷仅在内存中参与端侧分析；界面与历史只保存脱敏内容。' }) {
@@ -141,6 +141,7 @@ struct LinkPage {
               .onChange((value: string) => { this.sourceText = value; })
             ProcessingModeSelector({ mode: this.mode, disabled: this.scanning,
               onModeChange: (value: ProcessingMode) => { this.mode = value; } })
+              .margin({ top: 12 })
             Button(this.scanning ? '检查中…' :
               (this.mode === 'online' ? '开始联网链接检测' : '开始本地链接检测'))
               .width('100%').height(46).margin({ top: 10 })

@@ -259,20 +259,20 @@ struct PrivacyPage {
   build() {
     Column() {
       AppHeader({
-        title: 'Privacy Sentinel',
-        subtitle: '图片分享前隐私检查'
+        title: '隐私哨兵',
+        subtitle: 'Privacy Sentinel · 图片分享前隐私检查'
       })
 
       Scroll() {
         Column() {
           SectionCard({
             title: '01 选择图片',
-            copy: '联网分析会检查图片中的文字；检测到敏感或无法确认安全的二维码时，原图不会上传。'
+            copy: '选择要分享的图片，先在设备上完成检查。'
           }) {
             ProcessingModeSelector({
               mode: this.processingMode,
               disabled: this.scanning,
-              onlineHint: '联网分析会识别图片中的文字；符合安全条件时，原图会发送至服务端。',
+              onlineHint: '联网分析会识别图片中的文字；检测到敏感或无法确认安全的二维码时，原图不会上传。',
               onModeChange: (mode: ProcessingMode) => {
                 this.processingMode = mode;
               }
@@ -336,7 +336,7 @@ struct PrivacyPage {
             score: this.score,
             contextCopy: this.resultMeta,
             verdict: ScanPolicy.verdict(this.findings, this.localComplete, this.qrReport.uploadBlocked),
-            emptyCopy: '联网分析会识别图片中的文字；仅本地模式在设备上检查二维码。'
+            emptyCopy: '将检查图片中的文字与二维码，并标出可处理的隐私区域。'
           })
           .margin({ top: 12 })
 

@@ -5,6 +5,12 @@ export { ProcessingMode } from '../services/ScanPolicy';
 export struct ProcessingModeSelector {
   @Prop mode: ProcessingMode = 'local_only';
   @Prop onlineHint: string = '联网分析会将所选内容发送至配置的服务。';
+  /**
+   * Module identity colour for the selected pill. Defaults to the privacy blue;
+   * the code and document pages pass their own accent so a control never fights
+   * the module's primary action button.
+   */
+  @Prop accentColor: string = '#2563EB';
   @Prop disabled: boolean = false;
   onModeChange: (mode: ProcessingMode) => void = (_mode: ProcessingMode) => {};
 
@@ -22,7 +28,7 @@ export struct ProcessingModeSelector {
             .height(42)
             .fontSize(12)
             .fontColor(this.mode === mode ? '#FFFFFF' : '#334155')
-            .backgroundColor(this.mode === mode ? '#2563EB' : '#F1F5F9')
+            .backgroundColor(this.mode === mode ? this.accentColor : '#F1F5F9')
             .enabled(!this.disabled)
             .onClick(() => { this.onModeChange(mode); })
         })
