@@ -238,8 +238,10 @@ class DocReputationQuery(BaseModel):
     declaredExtension: Optional[str] = Field(default=None, max_length=20)
     detectedType: Optional[str] = Field(default=None, max_length=80)
     localVerdict: Literal["clean", "suspicious", "malicious", "unknown"] = "unknown"
-    # Domains, URLs and addresses the device extracted.
-    indicators: List[str] = Field(default_factory=list, max_length=200)
+    # Accepted for wire compatibility with clients that still send extracted
+    # domains/URLs, but NOT used for matching: the signed feed only carries
+    # SHA-256 indicators, so no domain blocklist is consulted.
+    indicators: List[str] = Field(default_factory=list, max_length=200, deprecated=True)
 
 
 class DocReputationRequest(BaseModel):
@@ -257,6 +259,8 @@ class DocReputationResult(BaseModel):
 class DocReputationResponse(BaseModel):
     feedVersion: str
     entries: int
+    # unconfigured | signed | stale | unavailable
+    feedStatus: Literal["unconfigured", "signed", "stale", "unavailable"] = "unconfigured"
     results: List[DocReputationResult]
     message: str
 

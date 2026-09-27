@@ -17,6 +17,11 @@ MAX_BYTES = 2 * 1024 * 1024
 
 
 def verify(raw: bytes, public_key: bytes, minimum_version: int = 0) -> dict:
+    """Verify signature, validity window and entries.
+
+    ``minimum_version`` is the oldest version still accepted, so re-verifying
+    the currently installed feed is allowed while a replayed older one is not.
+    """
     if len(raw) > MAX_BYTES:
         raise ValueError('feed too large')
     envelope = json.loads(raw)
@@ -25,8 +30,8 @@ def verify(raw: bytes, public_key: bytes, minimum_version: int = 0) -> dict:
     Ed25519PublicKey.from_public_bytes(public_key).verify(
         base64.b64decode(envelope['signature'], validate=True), canonical)
     version = payload['version']
-    if type(version) is not int or version <= minimum_version:
-        raise ValueError('feed version must increase')
+    if type(version) is not int or version < minimum_version:
+        raise ValueError('feed version must not decrease')
     now = datetime.now(timezone.utc)
     updated = datetime.fromisoformat(payload['updated_at'])
     expires = datetime.fromisoformat(payload['expires_at'])
@@ -62,17 +67,24 @@ def _atomic_write(path: Path, raw: bytes) -> None:
             os.unlink(name)
 
 
-def install(path: Path, raw: bytes, public_key: bytes) -> dict:
-    """Verify before replacing; retain previous bytes for operator recovery."""
+def install(path: Path, raw: bytes, public_key: bytes, minimum_version: int = 0) -> dict:
+    """Verify before replacing; retain previous bytes for operator recovery.
+
+    The replacement must be signed and strictly newer than both
+    ``minimum_version`` and the feed currently on disk, so a replayed older
+    envelope cannot roll the library back.
+    """
     current = path.read_bytes() if path.exists() else None
-    version = 0
+    version = minimum_version
     if current is not None:
+        if len(current) > MAX_BYTES:
+            raise ValueError('installed feed too large')
         # Authenticate old version even if its validity period has expired.
         old = json.loads(current)
         canonical = json.dumps(old['payload'], ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()
         Ed25519PublicKey.from_public_bytes(public_key).verify(base64.b64decode(old['signature'], validate=True), canonical)
-        version = old['payload']['version']
-    payload = verify(raw, public_key, version)
+        version = max(version, old['payload']['version'])
+    payload = verify(raw, public_key, version + 1)
     if current is not None:
         _atomic_write(path.with_suffix('.previous.json'), current)
     _atomic_write(path, raw)

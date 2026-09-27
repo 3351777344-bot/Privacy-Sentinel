@@ -18,8 +18,9 @@ jobs:
       - run: python tools/threat-tests/make_fixtures.py
       - run: node tools/threat-tests/prepare.mjs
       - run: node --experimental-strip-types tools/threat-tests/run-tests.mjs
-      - run: node tools/threat-tests/privacy-contract.mjs
-      - run: python tools/release-check.py
+      - run: node --experimental-strip-types tools/threat-tests/privacy-contract.mjs
+      - name: Release checks (config, artifact manifest, docs)
+        run: python tools/release-check.py
       - name: harmony-manual-build-required
         run: echo 'Harmony SDK and signing are not installed on this runner. Build HAP and run real-device regression before release.'
   backend:

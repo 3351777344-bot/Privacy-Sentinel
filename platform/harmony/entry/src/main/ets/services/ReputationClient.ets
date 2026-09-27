@@ -4,8 +4,9 @@
  * Opt-in second opinion for files whose local verdict is *suspicious* but not
  * conclusive. The privacy boundary is the whole point of this class:
  *
- *  * only a SHA-256 digest plus indicators the scanner already extracted are
- *    sent — never file content, never the file itself;
+ *  * only a SHA-256 digest plus the local verdict is sent — never file content,
+ *    never the file itself, and no domain/URL indicators (the signed feed is a
+ *    hash blocklist, so extracted addresses would not be matched anyway);
  *  * the call is only made when the caller opts in, and only for suspicious
  *    files, so a clean scan stays entirely offline;
  *  * every failure is swallowed — the local verdict always stands on its own.
@@ -23,14 +24,12 @@ export interface ReputationQuery {
   declaredExtension?: string;
   detectedType?: string;
   localVerdict: string;
-  indicators: string[];
 }
 
 /** Wire format for one query, matching the server's `DocReputationQuery`. */
 interface ReputationPayload {
   sha256: string;
   localVerdict: string;
-  indicators: string[];
   fileName?: string;
   declaredExtension?: string;
   detectedType?: string;
@@ -102,12 +101,9 @@ export class ReputationClient {
   }
 
   private static toPayload(query: ReputationQuery): ReputationPayload {
-    const indicators: string[] = query.indicators.length > 200
-      ? query.indicators.slice(0, 200) : query.indicators;
     const payload: ReputationPayload = {
       sha256: query.sha256,
-      localVerdict: query.localVerdict,
-      indicators: []
+      localVerdict: query.localVerdict
     };
     if (query.declaredExtension !== undefined) {
       payload.declaredExtension = query.declaredExtension;
@@ -127,16 +123,14 @@ export class ReputationClient {
       ? result.family : '已知恶意样本';
     const notes: string = result.notes.length > 0 ? ` ${result.notes.join(' ')}` : '';
 
-    // A hash hit is decisive; an infrastructure-only hit is strong but not proof.
-    const hashHit: boolean = result.confidence >= 90;
+    // The signed feed only carries SHA-256 indicators, so every hit is a hash
+    // hit; there is no "infrastructure-only" branch to downgrade.
     return [{
-      id: hashHit ? 'reputation.hash-hit' : 'reputation.infrastructure',
-      category: hashHit ? 'signature-match' : 'ioc',
-      label: hashHit ? '云端情报库命中该文件' : '云端情报库命中关联地址',
-      detail: hashHit
-        ? `云端情报库记录该文件属于「${family}」。${notes}`
-        : `文件中出现的域名或地址与「${family}」相关。${notes}`,
-      level: hashHit ? 'high' : 'medium',
+      id: 'reputation.hash-hit',
+      category: 'signature-match',
+      label: '云端情报库命中该文件',
+      detail: `云端情报库记录该文件属于「${family}」。${notes}`,
+      level: 'high',
       source: 'ReputationClient',
       evidence: `${query.sha256.substring(0, 16)}…`
     }];

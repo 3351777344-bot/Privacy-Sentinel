@@ -54,8 +54,9 @@ export interface ThreatScanReport {
   containerKind: string;
   findings: ThreatFinding[];
   /**
-   * Network indicators pulled out of the file. Carried on the report so an
-   * opt-in cloud lookup can submit them without rescanning the payload.
+   * Network indicators pulled out of the file, kept for the local report.
+   * They are deliberately not submitted to the cloud lookup: the signed feed
+   * is a SHA-256 blocklist, so extracted addresses are never matched.
    */
   indicators: string[];
   verdict: ThreatVerdict;

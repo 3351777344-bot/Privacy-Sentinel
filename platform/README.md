@@ -65,7 +65,7 @@ cd harmony
 Copy-Item .env.example .env
 ```
 
-本地模式无需 API 密钥。DeepSeek 和 Qwen VL 默认关闭；不要把真实密钥写入 `.env.example` 或提交到 Git。
+本地模式无需 API 密钥。DeepSeek 默认关闭；它是后端唯一的外部模型（文本隐私分析、代码审计、图片视觉都走它）。不要把真实密钥写入 `.env.example` 或提交到 Git。
 
 关键限制的默认值：
 

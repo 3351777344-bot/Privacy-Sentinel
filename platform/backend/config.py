@@ -59,18 +59,18 @@ class Settings:
     face_model_path: str = os.getenv("GUARDIANHUB_FACE_MODEL_PATH", "").strip()
     default_mask_type: str = os.getenv("GUARDIANHUB_DEFAULT_MASK_TYPE", "mosaic").strip().lower()
     enable_external_image_analysis: bool = _bool_env("GUARDIANHUB_ENABLE_EXTERNAL_IMAGE_ANALYSIS")
-    qwen_api_key: str = _str_env("GUARDIANHUB_QWEN_API_KEY")
-    qwen_model: str = _str_env("GUARDIANHUB_QWEN_MODEL", "qwen3-vl-flash")
-    qwen_api_base: str = _str_env("GUARDIANHUB_QWEN_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-    qwen_enabled: bool = _bool_env("GUARDIANHUB_QWEN_ENABLED")
-    qwen_timeout_seconds: int = _int_env("GUARDIANHUB_QWEN_TIMEOUT_SECONDS", 35)
-    qwen_image_max_side: int = _int_env("GUARDIANHUB_QWEN_IMAGE_MAX_SIDE", 1280)
-    qwen_max_tokens: int = _int_env("GUARDIANHUB_QWEN_MAX_TOKENS", 1536)
     code_engine: str = os.getenv("GUARDIANHUB_CODE_ENGINE", "deepseek").strip().lower()
+    # DeepSeek V4.1 Flash covers text, code and vision, so it is the only
+    # external model the backend needs. `deepseek-v4-flash` and
+    # `deepseek-v4-flash-vision-exp` are retired names still served by this model.
     deepseek_api_key: str = _str_env("GUARDIANHUB_DEEPSEEK_API_KEY")
-    deepseek_model: str = _str_env("GUARDIANHUB_DEEPSEEK_MODEL", "deepseek-v4-flash")
+    deepseek_model: str = _str_env("GUARDIANHUB_DEEPSEEK_MODEL", "deepseek-flash")
+    deepseek_vision_model: str = _str_env("GUARDIANHUB_DEEPSEEK_VISION_MODEL", "deepseek-flash")
     deepseek_api_base: str = _str_env("GUARDIANHUB_DEEPSEEK_API_BASE", "https://api.deepseek.com")
     deepseek_enabled: bool = _bool_env("GUARDIANHUB_DEEPSEEK_ENABLED")
+    deepseek_timeout_seconds: int = _int_env("GUARDIANHUB_DEEPSEEK_TIMEOUT_SECONDS", 60)
+    deepseek_max_tokens: int = _int_env("GUARDIANHUB_DEEPSEEK_MAX_TOKENS", 2048)
+    vision_image_max_side: int = _int_env("GUARDIANHUB_VISION_IMAGE_MAX_SIDE", 1280)
 
 
 settings = Settings()

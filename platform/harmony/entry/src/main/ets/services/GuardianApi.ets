@@ -8,27 +8,44 @@ import { ThreatScanner } from './ThreatScanner';
 import { CodeAnalyzeResponse, DetectResponse, DocCheckResponse, LinkCheckResponse, PrivacyProcessResponse } from '../models/SecurityModels';
 export { API_BASE_URL } from './ApiConfig';
 
+/**
+ * One masking operation is two HTTP round trips (ask the server to mask the
+ * already-uploaded image, then fetch the result). They share a single consent
+ * text so the user approves the whole operation once, not once per request.
+ */
+const MASK_DISCLOSURE =
+  '发送图片记录编号与遮挡方式，并取回服务端生成的脱敏图；不重新上传原图。';
+
+/** Result of one masking operation: the server record plus the masked image bytes. */
+export interface MaskedImageResult {
+  response: PrivacyProcessResponse;
+  image: ArrayBuffer;
+}
+
 export class GuardianApi {
+  private static async dispatch(path: string, options: http.HttpRequestOptions): Promise<Object> {
+    const request = http.createHttp();
+    try {
+      const headers = options.header as Record<string, string>;
+      headers['X-Guardian-Consent'] = 'explicit';
+      options.header = headers;
+      options.expectDataType = http.HttpDataType.STRING;
+      options.connectTimeout = 15000;
+      options.readTimeout = 60000;
+      const response = await request.request(`${API_BASE_URL}${path}`, options);
+      if (response.responseCode < 200 || response.responseCode >= 300) {
+        throw new Error(`服务返回 ${response.responseCode}。`);
+      }
+      return response.result as Object;
+    } finally { request.destroy(); }
+  }
+
   private static async send<T>(path: string, options: http.HttpRequestOptions,
-    transfer: TransferSession, disclosure: string): Promise<T> {
+    transfer: TransferSession, disclosure: string,
+    decode: (result: Object) => T = (result: Object): T => JSON.parse(result as string) as T): Promise<T> {
     return transfer.run<T>(
       async (): Promise<void> => { await NetworkConsent.require(`${disclosure}\n目的地址：${API_BASE_URL}`); },
-      async (): Promise<T> => {
-        const request = http.createHttp();
-        try {
-          const headers = options.header as Record<string, string>;
-          headers['X-Guardian-Consent'] = 'explicit';
-          options.header = headers;
-          options.expectDataType = http.HttpDataType.STRING;
-          options.connectTimeout = 15000;
-          options.readTimeout = 60000;
-          const response = await request.request(`${API_BASE_URL}${path}`, options);
-          if (response.responseCode < 200 || response.responseCode >= 300) {
-            throw new Error('分析结果未完成。');
-          }
-          return JSON.parse(response.result as string) as T;
-        } finally { request.destroy(); }
-      }
+      (): Promise<T> => GuardianApi.dispatch(path, options).then((result: Object): T => decode(result))
     );
   }
 
@@ -94,33 +111,31 @@ export class GuardianApi {
     throw new Error('演示请使用本地合成样本，从文件或相册选择。');
   }
 
-  static processPrivacy(imageId: string, maskType: string,
-    transfer: TransferSession = new TransferSession()): Promise<PrivacyProcessResponse> {
-    return GuardianApi.send<PrivacyProcessResponse>('/api/privacy/process', {
-      method: http.RequestMethod.POST, header: { 'Content-Type': 'application/json' },
-      extraData: JSON.stringify({ imageId: imageId, scope: 'all', maskType: maskType, itemIds: [] })
-    }, transfer, '发送已上传图片的记录编号与遮挡方式，不重新上传原图。');
-  }
-
-  static async downloadProcessedImage(path: string): Promise<ArrayBuffer> {
-    const request = http.createHttp();
-    try {
-      const response = await request.request(`${API_BASE_URL}${path}`, {
-        method: http.RequestMethod.GET,
-        expectDataType: http.HttpDataType.ARRAY_BUFFER,
-        connectTimeout: 15000,
-        readTimeout: 60000
-      });
-      if (response.responseCode < 200 || response.responseCode >= 300) {
-        throw new Error(`处理图下载失败，服务返回 ${response.responseCode}`);
+  /**
+   * Ask the server to mask an already-uploaded image and fetch the result as one
+   * user-visible operation: one consent dialog, one transfer session, no retry.
+   * Both requests are dispatched only after that single explicit approval, so
+   * there is no unmetered GET path around the transfer policy.
+   */
+  static async processAndDownloadImage(imageId: string, maskType: string, mode: ProcessingMode,
+    transfer: TransferSession = new TransferSession(mode)): Promise<MaskedImageResult> {
+    return transfer.run<MaskedImageResult>(
+      async (): Promise<void> => {
+        await NetworkConsent.require(`${MASK_DISCLOSURE}\n目的地址：${API_BASE_URL}`);
+      },
+      async (): Promise<MaskedImageResult> => {
+        const processed = await GuardianApi.dispatch('/api/privacy/process', {
+          method: http.RequestMethod.POST, header: { 'Content-Type': 'application/json' },
+          extraData: JSON.stringify({ imageId: imageId, scope: 'all', maskType: maskType, itemIds: [] })
+        });
+        const response = JSON.parse(processed as string) as PrivacyProcessResponse;
+        const image = await GuardianApi.dispatch(response.processedImageUrl, {
+          method: http.RequestMethod.GET
+        });
+        const result: MaskedImageResult = { response: response, image: image as ArrayBuffer };
+        return result;
       }
-      return response.result as ArrayBuffer;
-    } catch (error) {
-      const typedError = error as Error;
-      throw new Error(typedError.message || '无法下载处理后的图片。');
-    } finally {
-      request.destroy();
-    }
+    );
   }
 
   private static imageContentType(fileName: string): string {

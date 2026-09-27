@@ -309,7 +309,7 @@ async def detect(
     original_url = f"/static/uploads/{saved_path.name}"
     try:
         # Run CPU/network-bound detection off the event loop so local requests
-        # are not blocked behind a slow online (Qwen) call.
+        # are not blocked behind a slow online (DeepSeek) call.
         result = await asyncio.to_thread(
             detect_privacy_items,
             str(saved_path),
@@ -556,9 +556,10 @@ async def check_doc(
 def doc_reputation(payload: DocReputationRequest) -> DocReputationResponse:
     """L3 reputation lookup for Doc Shield.
 
-    Metadata only. The device sends a SHA-256 digest plus indicators it already
-    extracted locally; file content never reaches this service, and nothing in
-    the request is persisted.
+    Metadata only. The device sends a SHA-256 digest; file content never reaches
+    this service, and nothing in the request is persisted. Matching is done
+    against the operator-signed SHA-256 feed only — a legacy ``indicators``
+    field is still accepted for wire compatibility but is not consulted.
     """
     results: list[DocReputationResult] = []
     for query in payload.files:
@@ -582,14 +583,6 @@ def doc_reputation(payload: DocReputationRequest) -> DocReputationResponse:
             if entry.get("firstSeen"):
                 notes.append(f"首次收录：{entry['firstSeen']}")
 
-        matched = threat_feed.match_indicators(query.indicators)
-        if matched:
-            confidence = max(confidence, 70)
-            notes.append("命中情报黑名单的域名或地址：" + "、".join(matched[:5]))
-            if not known:
-                known = True
-                family = "关联已知恶意基础设施"
-
         if not notes:
             if query.localVerdict in ("suspicious", "malicious"):
                 notes.append("云端情报库暂无该文件的记录，请以端内检测结论为准。")
@@ -608,12 +601,18 @@ def doc_reputation(payload: DocReputationRequest) -> DocReputationResponse:
 
     if threat_feed.has_feed():
         message = f"已比对情报库 {threat_feed.version}（{threat_feed.entries} 条）。"
+    elif threat_feed.last_error:
+        message = (
+            f"云端情报库不可用（{threat_feed.last_error}），本次仅返回内置测试样本比对结果，"
+            "请以端内检测为准。"
+        )
     else:
         message = "云端情报库尚未配置，本次仅返回内置测试样本比对结果，请以端内检测为准。"
 
     return DocReputationResponse(
         feedVersion=threat_feed.version,
         entries=threat_feed.entries,
+        feedStatus=threat_feed.status,
         results=results,
         message=message,
     )

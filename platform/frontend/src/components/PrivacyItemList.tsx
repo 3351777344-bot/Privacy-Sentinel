@@ -10,7 +10,7 @@ const SOURCE_LABELS: Record<string, string> = {
   qr: 'QR',
   face: '人脸',
   rule: '规则',
-  vision_api: 'Qwen VL',
+  vision_api: 'DeepSeek 视觉',
   demo: '演示',
 };
 

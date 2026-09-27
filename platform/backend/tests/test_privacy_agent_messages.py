@@ -1,22 +1,23 @@
 """Honesty contract for the privacy agent's user-facing engine messages.
 
-The detector must never claim that Qwen VL analysed an image when the model was
-not actually called. These messages are surfaced verbatim in the app, so a false
-claim is a visible correctness problem, not just a wording nit.
+The detector must never claim that DeepSeek vision analysed an image when the
+model was not actually called. These messages are surfaced verbatim in the app,
+so a false claim is a visible correctness problem, not just a wording nit.
 """
 from types import SimpleNamespace
 
 import pytest
 
-from detector import privacy_agent
+from detector import privacy_agent, vision_detector
 from schemas.models import Box, DetectResponse, PrivacyItem
 
 
-def _settings(*, qwen_enabled: bool, qwen_api_key: str = "test-key") -> SimpleNamespace:
+def _settings(*, vision_enabled: bool, api_key: str = "test-key") -> SimpleNamespace:
     return SimpleNamespace(
-        qwen_enabled=qwen_enabled,
-        qwen_api_key=qwen_api_key,
-        qwen_model="qwen3-vl-flash",
+        deepseek_enabled=vision_enabled,
+        deepseek_api_key=api_key,
+        deepseek_model="deepseek-flash",
+        deepseek_vision_model="deepseek-flash",
         ocr_engine="rapidocr",
         qr_engine="opencv",
         face_engine="disabled",
@@ -53,21 +54,21 @@ def _base_result() -> DetectResponse:
     ("enabled", "api_key"),
     [(False, "test-key"), (True, ""), (False, "")],
 )
-def test_qwen_active_requires_flag_and_key(enabled: bool, api_key: str) -> None:
+def test_vision_active_requires_flag_and_key(enabled: bool, api_key: str) -> None:
     original = privacy_agent.settings
     try:
-        privacy_agent.settings = _settings(qwen_enabled=enabled, qwen_api_key=api_key)
-        assert privacy_agent._qwen_active() is False
-        privacy_agent.settings = _settings(qwen_enabled=True, qwen_api_key="k")
-        assert privacy_agent._qwen_active() is True
+        privacy_agent.settings = _settings(vision_enabled=enabled, api_key=api_key)
+        assert privacy_agent._vision_active() is False
+        privacy_agent.settings = _settings(vision_enabled=True, api_key="k")
+        assert privacy_agent._vision_active() is True
     finally:
         privacy_agent.settings = original
 
 
-def test_hybrid_does_not_claim_qwen_when_disabled(monkeypatch) -> None:
-    """Qwen off -> the message must state it never left the device."""
+def test_hybrid_does_not_claim_vision_when_disabled(monkeypatch) -> None:
+    """Vision off -> the message must state it never left the device."""
     original = privacy_agent.settings
-    privacy_agent.settings = _settings(qwen_enabled=False)
+    privacy_agent.settings = _settings(vision_enabled=False)
     monkeypatch.setattr(
         privacy_agent, "_detect_faces", lambda *a, **k: []
     )
@@ -80,22 +81,22 @@ def test_hybrid_does_not_claim_qwen_when_disabled(monkeypatch) -> None:
 
     # No claim of a joint analysis, and no mention of the model being called.
     assert "联合分析" not in response.detectorMessage
-    assert "Qwen VL 未启用" in response.detectorMessage
+    assert "DeepSeek 未启用" in response.detectorMessage
     assert "已上传到后端" in response.detectorMessage
     assert "未发送给外部模型" in response.detectorMessage
-    assert "Qwen VL 新增" not in response.summary
-    assert "Qwen VL 未启用" in response.summary
+    assert "DeepSeek 视觉新增" not in response.summary
+    assert "DeepSeek 视觉未启用" in response.summary
     assert "本地检测发现" in response.summary
     assert response.detectorMode == "hybrid"
 
 
-def test_hybrid_reports_joint_analysis_when_qwen_active(monkeypatch) -> None:
-    """Qwen on -> the joint-analysis wording is legitimate."""
+def test_hybrid_reports_joint_analysis_when_vision_active(monkeypatch) -> None:
+    """Vision on -> the joint-analysis wording is legitimate."""
     original = privacy_agent.settings
-    privacy_agent.settings = _settings(qwen_enabled=True)
+    privacy_agent.settings = _settings(vision_enabled=True)
     monkeypatch.setattr(privacy_agent, "_detect_faces", lambda *a, **k: [])
     monkeypatch.setattr(
-        privacy_agent, "enhance_with_qwen", lambda items, *a, **k: list(items), raising=False
+        vision_detector, "enhance_with_vision", lambda items, *a, **k: list(items)
     )
     try:
         response = privacy_agent._detect_hybrid(
@@ -105,14 +106,14 @@ def test_hybrid_reports_joint_analysis_when_qwen_active(monkeypatch) -> None:
         privacy_agent.settings = original
 
     assert "联合分析" in response.detectorMessage
-    assert "Qwen VL 新增" in response.summary
+    assert "DeepSeek 视觉新增" in response.summary
 
 
 def test_vision_api_disabled_reports_disabled_not_failure(monkeypatch) -> None:
     """Disabled is not the same as broken: the message must not say 'failed'."""
     original = privacy_agent.settings
-    privacy_agent.settings = _settings(qwen_enabled=False)
-    monkeypatch.setattr(privacy_agent, "detect_with_qwen", lambda *a, **k: [], raising=False)
+    privacy_agent.settings = _settings(vision_enabled=False)
+    monkeypatch.setattr(vision_detector, "detect_with_vision", lambda *a, **k: [])
     try:
         response = privacy_agent._detect_vision_api(
             _base_result(), "unused.png", "img_test", "/static/x.png", 400, 200
@@ -128,8 +129,8 @@ def test_vision_api_disabled_reports_disabled_not_failure(monkeypatch) -> None:
 def test_vision_api_enabled_reports_real_failure(monkeypatch) -> None:
     """Enabled but returning nothing is a genuine failure and should say so."""
     original = privacy_agent.settings
-    privacy_agent.settings = _settings(qwen_enabled=True)
-    monkeypatch.setattr(privacy_agent, "detect_with_qwen", lambda *a, **k: [], raising=False)
+    privacy_agent.settings = _settings(vision_enabled=True)
+    monkeypatch.setattr(vision_detector, "detect_with_vision", lambda *a, **k: [])
     try:
         response = privacy_agent._detect_vision_api(
             _base_result(), "unused.png", "img_test", "/static/x.png", 400, 200

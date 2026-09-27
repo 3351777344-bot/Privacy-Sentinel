@@ -125,7 +125,7 @@ struct PrivacyPage {
     this.processedImageUri = '';
     this.scanning = true;
     this.statusMessage = this.processingMode === 'online' ?
-      '正在载入演示图，并调用 Qwen 联网增强…' :
+      '正在载入演示图，并调用 DeepSeek 联网增强…' :
       '正在载入演示图片并执行真实隐私检测…';
     try {
       const report = await GuardianApi.detectPrivacyDemo(this.processingMode);
@@ -176,9 +176,9 @@ struct PrivacyPage {
       } else if (this.imageId.length > 0 && this.processingMode !== 'local_only') {
         const transfer = new TransferSession(this.processingMode);
         try {
-          const result = await GuardianApi.processPrivacy(this.imageId, this.maskMode, transfer);
-          const data = await GuardianApi.downloadProcessedImage(result.processedImageUrl);
-          this.processedImageUri = await ProcessedImageService.cache(this.abilityContext(), data);
+          const masked = await GuardianApi.processAndDownloadImage(
+            this.imageId, this.maskMode, this.processingMode, transfer);
+          this.processedImageUri = await ProcessedImageService.cache(this.abilityContext(), masked.image);
           this.statusMessage = '远程处理完成，请复核遮挡范围。';
         } finally { this.resultMeta = '远程遮挡 · ' + transfer.describe(); }
       } else {
@@ -266,7 +266,7 @@ struct PrivacyPage {
             ProcessingModeSelector({
               mode: this.processingMode,
               disabled: this.scanning,
-              onlineHint: 'Qwen 增强识别',
+              onlineHint: 'DeepSeek 增强识别',
               onModeChange: (mode: ProcessingMode) => {
                 this.processingMode = mode;
               }

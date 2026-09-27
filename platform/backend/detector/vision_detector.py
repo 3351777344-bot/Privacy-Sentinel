@@ -9,11 +9,10 @@ from schemas.models import Box, PrivacyItem
 
 logger = logging.getLogger(__name__)
 
-_OCR_TEXT_PROMPT = (
-    "Recognize all text in the image. Return ONLY JSON without markdown:\n"
-    '[{"text":"line text","rotate_rect":[center_x,center_y,width,height,angle]}]\n'
-    "Use 0-1000 normalized coordinates for rotate_rect."
-)
+# Vision detection runs on the same DeepSeek V4.1 Flash model as the rest of the
+# backend. The legacy `deepseek-v4-flash-vision-exp` name is retired and served by
+# this model, so there is no separate vision endpoint or key to configure.
+_DEEPSEEK_VISION_MODEL = "deepseek-flash"
 
 _TYPE_MAPPING = {
     "phone": "phone",
@@ -95,7 +94,7 @@ def _encode_image_for_vision(image_path: str) -> tuple[str, str]:
     Returns ``(base64_payload, mime_type)``. Falls back to the original file bytes
     when Pillow cannot open the image.
     """
-    max_side = max(256, int(getattr(settings, "qwen_image_max_side", 1280) or 1280))
+    max_side = max(256, int(getattr(settings, "vision_image_max_side", 1280) or 1280))
     try:
         from io import BytesIO
 
@@ -121,24 +120,23 @@ def _encode_image_for_vision(image_path: str) -> tuple[str, str]:
         return _image_to_base64(image_path), mime_map.get(ext, "image/png")
 
 
-def _qwen_client():
+def _vision_client():
     from openai import OpenAI
 
-    timeout = max(5, int(getattr(settings, "qwen_timeout_seconds", 35) or 35))
+    timeout = max(5, int(getattr(settings, "deepseek_timeout_seconds", 60) or 60))
     return OpenAI(
-        api_key=settings.qwen_api_key,
-        base_url=settings.qwen_api_base,
+        api_key=settings.deepseek_api_key,
+        base_url=settings.deepseek_api_base,
         timeout=timeout,
     )
 
 
-def _qwen_max_tokens() -> int:
-    return max(256, int(getattr(settings, "qwen_max_tokens", 1536) or 1536))
+def _vision_max_tokens() -> int:
+    return max(256, int(getattr(settings, "deepseek_max_tokens", 2048) or 2048))
 
 
-def _is_ocr_model(model: str | None = None) -> bool:
-    name = (model or settings.qwen_model or "").lower()
-    return "ocr" in name
+def _vision_model() -> str:
+    return getattr(settings, "deepseek_vision_model", "") or _DEEPSEEK_VISION_MODEL
 
 
 def _extract_json_payload(content: str):
@@ -192,24 +190,22 @@ def _normalized_to_pixel(bbox_2d: list[float], img_w: int, img_h: int) -> Box:
     return Box(x=left, y=top, width=w, height=h)
 
 
-def _call_qwen_api(image_path: str) -> list[dict]:
-    if not settings.qwen_enabled or not settings.qwen_api_key:
-        logger.warning("Qwen VL API disabled or missing API key")
+def _call_deepseek_vision(image_path: str) -> list[dict]:
+    if not settings.deepseek_enabled or not settings.deepseek_api_key:
+        logger.warning("DeepSeek vision API disabled or missing API key")
         return []
 
     try:
         from openai import OpenAI  # noqa: F401
     except ImportError:
-        logger.warning("openai package not installed, Qwen VL API unavailable")
+        logger.warning("openai package not installed, DeepSeek vision API unavailable")
         return []
 
     try:
         base64_image, mime_type = _encode_image_for_vision(image_path)
-        client = _qwen_client()
-        use_ocr = _is_ocr_model()
-        prompt = _OCR_TEXT_PROMPT if use_ocr else _PRIVACY_DETECTION_PROMPT
+        client = _vision_client()
         request: dict = {
-            "model": settings.qwen_model,
+            "model": _vision_model(),
             "messages": [
                 {
                     "role": "user",
@@ -218,94 +214,29 @@ def _call_qwen_api(image_path: str) -> list[dict]:
                             "type": "image_url",
                             "image_url": {"url": f"data:{mime_type};base64,{base64_image}"},
                         },
-                        {"type": "text", "text": prompt},
+                        {"type": "text", "text": _PRIVACY_DETECTION_PROMPT},
                     ],
                 },
             ],
-            "max_tokens": _qwen_max_tokens(),
+            "max_tokens": _vision_max_tokens(),
             "temperature": 0.1,
+            "response_format": {"type": "json_object"},
         }
-        if not use_ocr:
-            request["response_format"] = {"type": "json_object"}
 
         response = client.chat.completions.create(**request)
         content = response.choices[0].message.content
         payload = _extract_json_payload(content or "")
         if payload is None:
-            if use_ocr and content and content.strip():
-                return [{"type": "other", "label": "OCR文本", "text": content.strip()[:120], "riskLevel": "low"}]
             return []
-        if use_ocr:
-            return _ocr_payload_to_raw_items(payload)
         if isinstance(payload, dict):
             return payload.get("items", [])
         return []
     except Exception as exc:
-        logger.error("Qwen VL API call failed: %s", exc)
+        logger.error("DeepSeek vision API call failed: %s", exc)
         return []
 
 
-def _ocr_payload_to_raw_items(payload) -> list[dict]:
-    """Normalize OCR model outputs into VL-like raw item dicts."""
-    lines: list[dict] = []
-    if isinstance(payload, list):
-        lines = [item for item in payload if isinstance(item, dict)]
-    elif isinstance(payload, dict):
-        if isinstance(payload.get("texts"), list):
-            for item in payload["texts"]:
-                if isinstance(item, str):
-                    lines.append({"text": item})
-                elif isinstance(item, dict):
-                    lines.append(item)
-        elif isinstance(payload.get("items"), list):
-            return [item for item in payload["items"] if isinstance(item, dict)]
-        elif payload.get("text"):
-            lines.append({"text": str(payload["text"])})
-
-    raw_items: list[dict] = []
-    from detector.privacy_detector import PRIVACY_PATTERNS, _redact_text
-
-    for line in lines:
-        text = str(line.get("text", "")).strip()
-        if not text:
-            continue
-        bbox = line.get("bbox_2d")
-        rotate = line.get("rotate_rect")
-        matched = False
-        for finding_type, label, pattern, risk_level, suggestion in PRIVACY_PATTERNS:
-            match = pattern.search(text)
-            if not match:
-                continue
-            matched = True
-            item = {
-                "type": finding_type,
-                "label": label,
-                "text": _redact_text(match.group(0), finding_type),
-                "riskLevel": risk_level,
-                "suggestion": suggestion,
-            }
-            if isinstance(bbox, list) and len(bbox) >= 4:
-                item["bbox_2d"] = bbox
-            if isinstance(rotate, list) and len(rotate) >= 4:
-                item["rotate_rect"] = rotate
-            raw_items.append(item)
-        if not matched and len(text) >= 6:
-            item = {
-                "type": "other",
-                "label": "OCR文本",
-                "text": text[:80],
-                "riskLevel": "low",
-                "suggestion": "请人工确认是否包含敏感信息。",
-            }
-            if isinstance(bbox, list) and len(bbox) >= 4:
-                item["bbox_2d"] = bbox
-            if isinstance(rotate, list) and len(rotate) >= 4:
-                item["rotate_rect"] = rotate
-            raw_items.append(item)
-    return raw_items
-
-
-def _parse_qwen_items(raw_items: list[dict], image_id: str, img_w: int, img_h: int) -> list[PrivacyItem]:
+def _parse_vision_items(raw_items: list[dict], image_id: str, img_w: int, img_h: int) -> list[PrivacyItem]:
     parsed: list[PrivacyItem] = []
     for idx, item in enumerate(raw_items, start=1):
         try:
@@ -326,7 +257,7 @@ def _parse_qwen_items(raw_items: list[dict], image_id: str, img_w: int, img_h: i
 
             parsed.append(
                 PrivacyItem(
-                    id=f"{image_id}_qwen_{idx}",
+                    id=f"{image_id}_vision_{idx}",
                     type=item_type,
                     label=str(item.get("label", "敏感信息")).strip(),
                     text=str(item.get("text", "检测到敏感内容")).strip(),
@@ -341,15 +272,16 @@ def _parse_qwen_items(raw_items: list[dict], image_id: str, img_w: int, img_h: i
                 )
             )
         except Exception as exc:
-            logger.warning("Failed to parse Qwen VL item %d: %s", idx, exc)
+            logger.warning("Failed to parse DeepSeek vision item %d: %s", idx, exc)
     return parsed
 
 
-def detect_with_qwen(image_path: str, image_id: str, img_w: int, img_h: int) -> list[PrivacyItem]:
-    raw_items = _call_qwen_api(image_path)
+def detect_with_vision(image_path: str, image_id: str, img_w: int, img_h: int) -> list[PrivacyItem]:
+    """Run DeepSeek vision detection on the image and return parsed privacy items."""
+    raw_items = _call_deepseek_vision(image_path)
     if not raw_items:
         return []
-    return _parse_qwen_items(raw_items, image_id, img_w, img_h)
+    return _parse_vision_items(raw_items, image_id, img_w, img_h)
 
 
 def _build_ocr_context(items: list[PrivacyItem]) -> str:
@@ -376,15 +308,15 @@ def _merge_vision_items(local_items: list[PrivacyItem], vision_items: list[Priva
     return merged
 
 
-def enhance_with_qwen(
+def enhance_with_vision(
     local_items: list[PrivacyItem],
     image_path: str,
     image_id: str,
     img_w: int,
     img_h: int,
 ) -> list[PrivacyItem]:
-    """Hybrid mode: send image to Qwen VL/OCR alongside local OCR results."""
-    if not settings.qwen_enabled or not settings.qwen_api_key:
+    """Hybrid mode: send the image to DeepSeek vision alongside local OCR results."""
+    if not settings.deepseek_enabled or not settings.deepseek_api_key:
         return local_items
 
     try:
@@ -394,14 +326,10 @@ def enhance_with_qwen(
 
     try:
         base64_image, mime_type = _encode_image_for_vision(image_path)
-        client = _qwen_client()
-        use_ocr = _is_ocr_model()
+        client = _vision_client()
 
-        if use_ocr:
-            prompt = _OCR_TEXT_PROMPT
-        else:
-            ocr_context = _build_ocr_context(local_items)
-            prompt = f"""Check this image for privacy risks. Local OCR already found:
+        ocr_context = _build_ocr_context(local_items)
+        prompt = f"""Check this image for privacy risks. Local OCR already found:
 {ocr_context}
 
 Return ONLY JSON:
@@ -419,7 +347,7 @@ Return ONLY JSON:
 Verify OCR hits, add missed risks only. Empty arrays if nothing new. JSON only."""
 
         request: dict = {
-            "model": settings.qwen_model,
+            "model": _vision_model(),
             "messages": [
                 {
                     "role": "user",
@@ -432,22 +360,17 @@ Verify OCR hits, add missed risks only. Empty arrays if nothing new. JSON only."
                     ],
                 },
             ],
-            "max_tokens": _qwen_max_tokens(),
+            "max_tokens": _vision_max_tokens(),
             "temperature": 0.1,
+            "response_format": {"type": "json_object"},
         }
-        if not use_ocr:
-            request["response_format"] = {"type": "json_object"}
 
         response = client.chat.completions.create(**request)
         content = response.choices[0].message.content
         payload = _extract_json_payload(content or "")
         if payload is None:
-            logger.error("Failed to parse hybrid Qwen response: empty or invalid JSON")
+            logger.error("Failed to parse hybrid DeepSeek vision response: empty or invalid JSON")
             return local_items
-
-        if use_ocr:
-            vision_items = _parse_qwen_items(_ocr_payload_to_raw_items(payload), image_id, img_w, img_h)
-            return _merge_vision_items(local_items, vision_items)
 
         if not isinstance(payload, dict):
             return local_items
@@ -473,8 +396,8 @@ Verify OCR hits, add missed risks only. Empty arrays if nothing new. JSON only."
             else:
                 updated_items.append(item)
 
-        new_items = _parse_qwen_items(payload.get("new_items", []), image_id, img_w, img_h)
+        new_items = _parse_vision_items(payload.get("new_items", []), image_id, img_w, img_h)
         return _merge_vision_items(updated_items, new_items)
     except Exception as exc:
-        logger.error("Hybrid Qwen VL call failed: %s", exc)
+        logger.error("Hybrid DeepSeek vision call failed: %s", exc)
         return local_items

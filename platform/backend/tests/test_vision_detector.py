@@ -10,13 +10,14 @@ from schemas.models import Box, PrivacyItem
 
 def _settings(*, enabled: bool = True, api_key: str = "test-key") -> SimpleNamespace:
     return SimpleNamespace(
-        qwen_enabled=enabled,
-        qwen_api_key=api_key,
-        qwen_api_base="https://example.invalid/v1",
-        qwen_model="test-vision-model",
-        qwen_timeout_seconds=35,
-        qwen_image_max_side=1280,
-        qwen_max_tokens=1536,
+        deepseek_enabled=enabled,
+        deepseek_api_key=api_key,
+        deepseek_api_base="https://example.invalid/v1",
+        deepseek_model="deepseek-flash",
+        deepseek_vision_model="deepseek-flash",
+        deepseek_timeout_seconds=60,
+        vision_image_max_side=1280,
+        deepseek_max_tokens=2048,
     )
 
 
@@ -67,16 +68,13 @@ def test_type_and_box_normalization() -> None:
     assert isinstance(fenced, list)
     assert fenced[0]["text"] == "13812345678"
 
-    raw_items = vision_detector._ocr_payload_to_raw_items(fenced)
-    assert any(item["type"] == "phone" for item in raw_items)
 
-
-def test_image_encoding_and_qwen_item_parsing(tmp_path) -> None:
+def test_image_encoding_and_vision_item_parsing(tmp_path) -> None:
     image_path = tmp_path / "sample.webp"
     image_path.write_bytes(b"guardianhub-image")
     assert base64.b64decode(vision_detector._image_to_base64(str(image_path))) == b"guardianhub-image"
 
-    parsed = vision_detector._parse_qwen_items(
+    parsed = vision_detector._parse_vision_items(
         [
             {
                 "type": "phone",
@@ -105,41 +103,41 @@ def test_image_encoding_and_qwen_item_parsing(tmp_path) -> None:
     assert parsed[1].recommendedMaskType == "mosaic"
 
 
-def test_qwen_api_disabled_and_success_paths(tmp_path, monkeypatch) -> None:
+def test_vision_api_disabled_and_success_paths(tmp_path, monkeypatch) -> None:
     image_path = tmp_path / "sample.png"
     image_path.write_bytes(b"png-bytes")
 
     monkeypatch.setattr(vision_detector, "settings", _settings(enabled=False))
-    assert vision_detector._call_qwen_api(str(image_path)) == []
+    assert vision_detector._call_deepseek_vision(str(image_path)) == []
 
     raw_items = [{"type": "二维码", "bbox_2d": [0, 0, 1000, 1000]}]
     completions = _FakeCompletions(json.dumps({"items": raw_items}, ensure_ascii=False))
     monkeypatch.setattr(vision_detector, "settings", _settings())
     monkeypatch.setattr(openai, "OpenAI", lambda **_kwargs: _FakeOpenAI(completions))
 
-    assert vision_detector._call_qwen_api(str(image_path)) == raw_items
+    assert vision_detector._call_deepseek_vision(str(image_path)) == raw_items
     request = completions.calls[0]
-    assert request["model"] == "test-vision-model"
+    assert request["model"] == "deepseek-flash"
     image_url = request["messages"][0]["content"][0]["image_url"]["url"]
     assert image_url.startswith("data:image/png;base64,")
 
-    detected = vision_detector.detect_with_qwen(str(image_path), "img_123", 120, 80)
+    detected = vision_detector.detect_with_vision(str(image_path), "img_123", 120, 80)
     assert len(detected) == 1
     assert detected[0].type == "qr_code"
     assert detected[0].source == "vision_api"
 
 
-def test_qwen_api_handles_empty_and_invalid_responses(tmp_path, monkeypatch) -> None:
+def test_vision_api_handles_empty_and_invalid_responses(tmp_path, monkeypatch) -> None:
     image_path = tmp_path / "sample.unknown"
     image_path.write_bytes(b"image")
     monkeypatch.setattr(vision_detector, "settings", _settings())
 
     completions = _FakeCompletions(None)
     monkeypatch.setattr(openai, "OpenAI", lambda **_kwargs: _FakeOpenAI(completions))
-    assert vision_detector._call_qwen_api(str(image_path)) == []
+    assert vision_detector._call_deepseek_vision(str(image_path)) == []
 
     completions.content = "not-json"
-    assert vision_detector._call_qwen_api(str(image_path)) == []
+    assert vision_detector._call_deepseek_vision(str(image_path)) == []
 
 
 def test_hybrid_context_and_disabled_fallback(monkeypatch) -> None:
@@ -150,7 +148,7 @@ def test_hybrid_context_and_disabled_fallback(monkeypatch) -> None:
     assert "bbox=(10,20,80x20)" in context
 
     monkeypatch.setattr(vision_detector, "settings", _settings(enabled=False))
-    assert vision_detector.enhance_with_qwen(local_items, "unused.png", "img_123", 200, 100) is local_items
+    assert vision_detector.enhance_with_vision(local_items, "unused.png", "img_123", 200, 100) is local_items
 
 
 def test_hybrid_response_verifies_and_adds_items(tmp_path, monkeypatch) -> None:
@@ -176,7 +174,7 @@ def test_hybrid_response_verifies_and_adds_items(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(vision_detector, "settings", _settings())
     monkeypatch.setattr(openai, "OpenAI", lambda **_kwargs: _FakeOpenAI(completions))
 
-    enhanced = vision_detector.enhance_with_qwen(
+    enhanced = vision_detector.enhance_with_vision(
         [local], str(image_path), "img_123", 200, 100
     )
     assert len(enhanced) == 2
@@ -186,7 +184,7 @@ def test_hybrid_response_verifies_and_adds_items(tmp_path, monkeypatch) -> None:
     assert enhanced[1].recommendedMaskType == "mosaic"
 
     completions.content = "invalid-json"
-    fallback = vision_detector.enhance_with_qwen(
+    fallback = vision_detector.enhance_with_vision(
         [local], str(image_path), "img_123", 200, 100
     )
     assert fallback == [local]

@@ -327,14 +327,13 @@ struct ShareCheckPage {
       if (this.imageId.length === 0) {
         throw new Error('当前仅完成二维码检测；未获得可处理的远程 OCR 结果。');
       }
-      const result =
-        await GuardianApi.processPrivacy(this.imageId, this.maskMode);
-      const imageData = await GuardianApi.downloadProcessedImage(result.processedImageUrl);
+      const masked = await GuardianApi.processAndDownloadImage(
+        this.imageId, this.maskMode, this.mode);
       this.processedImageUri =
-        await ProcessedImageService.cache(this.abilityContext(), imageData);
+        await ProcessedImageService.cache(this.abilityContext(), masked.image);
       this.processed = true;
       this.phase = 'report';
-      this.summary = result.message;
+      this.summary = masked.response.message;
       if (this.historyRecordId.length > 0) {
         await HistoryStore.updateProcessed(
           this.abilityContext(), this.historyRecordId, `已使用${this.maskMode}方式脱敏`);

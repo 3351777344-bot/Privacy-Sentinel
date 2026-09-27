@@ -259,17 +259,17 @@ def _detect_vision_api(
     width: int,
     height: int,
 ) -> DetectResponse:
-    from .vision_detector import detect_with_qwen
+    from .vision_detector import detect_with_vision
 
-    qwen_items = detect_with_qwen(image_path, image_id, width, height)
-    if not qwen_items:
+    vision_items = detect_with_vision(image_path, image_id, width, height)
+    if not vision_items:
         items = [_enrich_item(item) for item in base_result.items]
-        if _qwen_active():
+        if _vision_active():
             # The model was reachable but unusable: genuine failure, so say so.
-            fallback_message = "Qwen VL API 调用失败，已回退到本地 OCR 检测。"
+            fallback_message = "DeepSeek 视觉 API 调用失败，已回退到本地 OCR 检测。"
         else:
             fallback_message = (
-                "Qwen VL 未启用，本次仅执行后端 OCR；图像已上传到后端，未发送给外部模型。"
+                "DeepSeek 视觉未启用，本次仅执行后端 OCR；图像已上传到后端，未发送给外部模型。"
             )
         return base_result.model_copy(
             update={
@@ -281,7 +281,7 @@ def _detect_vision_api(
             }
         )
 
-    items = qwen_items + [_enrich_item(item) for item in base_result.items]
+    items = vision_items + [_enrich_item(item) for item in base_result.items]
     seen_ids = set()
     deduped: list[PrivacyItem] = []
     for item in items:
@@ -296,21 +296,21 @@ def _detect_vision_api(
         originalImageUrl=original_url,
         riskLevel=highest_risk(levels),
         score=calculate_security_score(levels),
-        summary=f"Qwen VL 视觉分析检测到 {len(deduped)} 个隐私区域（{labels}）。请确认并处理后再分享。",
+        summary=f"DeepSeek 视觉分析检测到 {len(deduped)} 个隐私区域（{labels}）。请确认并处理后再分享。",
         detectorMode="vision_api",
-        detectorMessage=f"Qwen VL ({settings.qwen_model}) 直接分析图片，已结合本地 OCR 结果。",
+        detectorMessage=f"DeepSeek 视觉 ({settings.deepseek_model}) 直接分析图片，已结合本地 OCR 结果。",
         items=deduped,
     )
 
 
-def _qwen_active() -> bool:
-    """True only when Qwen VL will really be called.
+def _vision_active() -> bool:
+    """True only when DeepSeek vision will really be called.
 
     Every user-facing message is derived from this check instead of from the
     configured engine name alone, so the UI never claims an external model
     analysed the image when it never ran.
     """
-    return bool(settings.qwen_enabled and settings.qwen_api_key)
+    return bool(settings.deepseek_enabled and settings.deepseek_api_key)
 
 
 def _detect_hybrid(
@@ -321,35 +321,35 @@ def _detect_hybrid(
     width: int,
     height: int,
 ) -> DetectResponse:
-    from .vision_detector import enhance_with_qwen
+    from .vision_detector import enhance_with_vision
 
     local_items = [_enrich_item(item) for item in base_result.items]
     local_items.extend(_detect_faces(image_path, width, height, image_id))
 
-    enhanced_items = enhance_with_qwen(local_items, image_path, image_id, width, height)
+    enhanced_items = enhance_with_vision(local_items, image_path, image_id, width, height)
 
-    qwen_new_count = max(0, len(enhanced_items) - len(local_items))
-    qwen_verified_count = sum(1 for item in enhanced_items if item.source == "vision_api")
+    vision_new_count = max(0, len(enhanced_items) - len(local_items))
+    vision_verified_count = sum(1 for item in enhanced_items if item.source == "vision_api")
 
     levels = [item.riskLevel for item in enhanced_items]
     labels = ", ".join(dict.fromkeys(item.label for item in enhanced_items))
-    if _qwen_active():
+    if _vision_active():
         summary = (
             f"混合检测发现 {len(enhanced_items)} 个隐私区域（{labels}），"
-            f"其中 Qwen VL 新增 {qwen_new_count} 项、验证 {qwen_verified_count} 项。"
+            f"其中 DeepSeek 视觉新增 {vision_new_count} 项、验证 {vision_verified_count} 项。"
         )
         detector_message = (
             f"Hybrid mode: 本地 OCR ({settings.ocr_engine}) + "
-            f"Qwen VL ({settings.qwen_model}) 联合分析。"
+            f"DeepSeek 视觉 ({settings.deepseek_model}) 联合分析。"
         )
     else:
         summary = (
             f"本地检测发现 {len(enhanced_items)} 个隐私区域（{labels}）。"
-            "Qwen VL 未启用，未进行联网图像分析。"
+            "DeepSeek 视觉未启用，未进行联网图像分析。"
         )
         detector_message = (
             f"后端规则分析：OCR={settings.ocr_engine}，QR={settings.qr_engine}，"
-            f"face={settings.face_engine}。Qwen VL 未启用；图像已上传到后端，未发送给外部模型。"
+            f"face={settings.face_engine}。DeepSeek 未启用；图像已上传到后端，未发送给外部模型。"
         )
     return DetectResponse(
         imageId=image_id,
