@@ -36,17 +36,21 @@ export function ImageCompareCard({ title, imageUrl }: { title: string; imageUrl:
 export function ProcessingModeSelector({
   value,
   onChange,
-  onlineAvailable = true
+  onlineAvailable = true,
+  localLabel = { title: '私有后端规则', hint: '需授权上传 不调用模型' },
+  onlineLabel = { title: '联网增强', hint: '调用已配置的模型服务' }
 }: {
   value: ProcessingMode;
   onChange: (mode: ProcessingMode) => void;
   onlineAvailable?: boolean;
+  localLabel?: { title: string; hint: string };
+  onlineLabel?: { title: string; hint: string };
 }) {
   return (
     <div className="processing-mode" role="group" aria-label="处理模式">
       <button className={value === 'local' ? 'selected' : ''} onClick={() => onChange('local')} type="button">
-        <strong>私有后端规则</strong>
-        <span>需授权上传 不调用模型</span>
+        <strong>{localLabel.title}</strong>
+        <span>{localLabel.hint}</span>
       </button>
       <button
         className={value === 'online' ? 'selected' : ''}
@@ -54,8 +58,8 @@ export function ProcessingModeSelector({
         onClick={() => onChange('online')}
         type="button"
       >
-        <strong>联网增强</strong>
-        <span>{onlineAvailable ? '调用已配置的模型服务' : '当前模块仅支持本地'}</span>
+        <strong>{onlineLabel.title}</strong>
+        <span>{onlineAvailable ? onlineLabel.hint : '当前模块仅支持本地'}</span>
       </button>
     </div>
   );

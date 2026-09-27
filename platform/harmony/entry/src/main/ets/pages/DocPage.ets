@@ -11,7 +11,7 @@ import { HistoryStore } from '../services/HistoryStore';
 import { ReputationClient, ReputationOutcome, ReputationQuery } from '../services/ReputationClient';
 import { RequirementStore } from '../services/RequirementStore';
 import { RequirementAudit, auditRequirement, scoreForFindings } from '../services/RequirementAudit';
-import { RequirementHint, precheck } from '../services/scanners/RequirementKeywords';
+import { RequirementHint, decorateHintForOnline, precheck } from '../services/scanners/RequirementKeywords';
 import {
   appendFindings,
   buildLocalSummary,
@@ -57,6 +57,12 @@ struct DocPage {
   @State scannedRequirement: string = '';
   /** Rules the server reported extracting, rendered under the report. */
   @State parsedEcho: string = '';
+  /** Content requirements the online pass read out of the brief, one per line. */
+  @State contentEcho: string = '';
+  /** Why the online requirement parse produced nothing, when it did not. */
+  @State modelWarning: string = '';
+  /** Set when the deployed backend has no online pass and ignored the mode. */
+  @State backendOutdated: boolean = false;
   /** Set when the brief or the file set changed after the last scan. */
   @State reportStale: boolean = false;
   @State hint: RequirementHint = EMPTY_HINT;
@@ -85,6 +91,22 @@ struct DocPage {
 
   private abilityContext(): common.UIAbilityContext {
     return this.getUIContext().getHostContext() as common.UIAbilityContext;
+  }
+
+  /**
+   * The pre-check hint to show under the editor.
+   *
+   * In online mode the hint gains a sentence about what the model adds — the
+   * raw advice tells the user to rewrite the brief with keywords the local table
+   * knows, which is needless work once the model is the one reading it. Derived
+   * here rather than stored so switching the mode updates the text without
+   * re-running `precheck` or touching the persisted brief.
+   */
+  private hintText(): string {
+    if (this.hint.message.length === 0) {
+      return '';
+    }
+    return this.mode === 'online' ? decorateHintForOnline(this.hint).message : this.hint.message;
   }
 
   aboutToAppear(): void {
@@ -222,6 +244,9 @@ struct DocPage {
       let backendScore: number = 0;
       let backendSummary: string = '';
       let backendParseEcho: string = '';
+      let backendContentEcho: string = '';
+      let backendModelWarning: string = '';
+      let backendOutdated: boolean = false;
       let backendReachable: boolean = false;
       try {
         if (ScanPolicy.shouldEnhance(mode)) {
@@ -244,6 +269,14 @@ struct DocPage {
         backendScore = report.score;
         backendSummary = report.summary;
         backendParseEcho = RequirementStore.describeParsed(report.parsedRequirements);
+        backendContentEcho = RequirementStore.describeContentRequirements(report.parsedRequirements);
+        const warning: string | null | undefined = report.parsedRequirements.modelWarning;
+        backendModelWarning = (warning === null || warning === undefined) ? '' : warning;
+        // A missing `source` means the deployed backend predates the online pass:
+        // it ignored the mode without erroring, so without this the report would
+        // silently be local-only under an "联网增强" heading.
+        backendOutdated = report.parsedRequirements.source !== 'local'
+          && report.parsedRequirements.source !== 'online';
         backendReachable = true;
         }
       } catch (error) {
@@ -254,6 +287,9 @@ struct DocPage {
       this.scannedCount = local.scannedFiles;
       this.scannedRequirement = brief;
       this.parsedEcho = backendParseEcho;
+      this.contentEcho = backendContentEcho;
+      this.modelWarning = backendModelWarning;
+      this.backendOutdated = backendOutdated;
       this.localEcho = local.localEcho;
       this.reportStale = false;
       this.findings = mergeFindings(local.findings, backendFindings);
@@ -404,8 +440,8 @@ struct DocPage {
                 this.applyRequirementEdit(value);
               })
 
-            if (this.hint.message.length > 0) {
-              Text(this.hint.message)
+            if (this.hintText().length > 0) {
+              Text(this.hintText())
                 .fontSize(11)
                 .fontColor(this.hint.level === 'weak' ? '#B45309' : '#94A3B8')
                 .lineHeight(17)
@@ -449,10 +485,12 @@ struct DocPage {
 
             ProcessingModeSelector({ mode: this.mode, disabled: this.scanning,
               accentColor: '#EA7C24',
+              onlineHint: '联网分析会由服务端 AI 识别你粘贴的提交要求，并核对材料内容；失败时自动回退本地规则结果。',
               onModeChange: (value: ProcessingMode) => { this.mode = value; } })
               .margin({ top: 12 })
 
-            Button(this.scanning ? '检查中…' : '开始提交前检查')
+            Button(this.scanning ? '检查中…'
+              : (this.mode === 'online' ? '开始联网增强检查' : '开始本地检查'))
               .enabled(!this.scanning)
               .width('100%')
               .height(46)
@@ -525,8 +563,33 @@ struct DocPage {
                 .lineHeight(19)
                 .margin({ top: 4 })
                 .width('100%')
+              if (this.backendOutdated) {
+                Text('当前部署的后端不包含联网解析：它忽略了处理模式，本次报告完全由规则生成。'
+                  + '请先部署后端，再重新检查以使用联网增强。')
+                  .fontSize(11)
+                  .fontColor('#B45309')
+                  .lineHeight(18)
+                  .margin({ top: 6 })
+                  .width('100%')
+              }
+              if (this.modelWarning.length > 0) {
+                Text(`联网解析提示：${this.modelWarning}`)
+                  .fontSize(11)
+                  .fontColor('#B45309')
+                  .lineHeight(18)
+                  .margin({ top: 6 })
+                  .width('100%')
+              }
               if (this.parsedEcho.length > 0) {
                 Text(`服务端解析出的规则：${this.parsedEcho}`)
+                  .fontSize(11)
+                  .fontColor('#64748B')
+                  .lineHeight(18)
+                  .margin({ top: 6 })
+                  .width('100%')
+              }
+              if (this.contentEcho.length > 0) {
+                Text(`识别出的内容要求：\n${this.contentEcho}`)
                   .fontSize(11)
                   .fontColor('#64748B')
                   .lineHeight(18)

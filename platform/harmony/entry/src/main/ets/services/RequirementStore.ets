@@ -77,6 +77,12 @@ export class RequirementStore {
    * which rules produced it. Returns a plain sentence when nothing was
    * extracted — that is the single most useful thing to show, because it
    * explains why a report looks unrelated to the brief.
+   *
+   * The line is prefixed with the engine that produced it: in online mode the
+   * server hands the brief to the model, and a report that quoted the same
+   * rules either way would hide whether that actually happened. When the online
+   * pass fails, the rules below are the server's local table instead, and the
+   * prefix is the honest place to say so.
    */
   static describeParsed(parsed: ParsedRequirements | undefined): string {
     if (parsed === undefined) {
@@ -101,9 +107,26 @@ export class RequirementStore {
       && parsed.deadline.length > 0) {
       parts.push(`截止 ${parsed.deadline}`);
     }
+    const prefix: string = parsed.source === 'online' ? '在线 AI 识别：' : '服务端规则识别：';
     if (parts.length === 0) {
-      return '服务端未能从这段文字中解析出任何具体要求，因此只执行了通用检查。';
+      return `${prefix}未能从这段文字中解析出任何具体要求，因此只执行了通用检查。`;
     }
-    return parts.join('；');
+    return `${prefix}${parts.join('；')}`;
+  }
+
+  /**
+   * The content requirements the model read out of the brief, one per line.
+   * Returns `''` when the online pass did not run, because the rule parser has
+   * no counterpart for prose requirements.
+   */
+  static describeContentRequirements(parsed: ParsedRequirements | undefined): string {
+    if (parsed === undefined || parsed.contentRequirements === undefined) {
+      return '';
+    }
+    const items: string[] = parsed.contentRequirements;
+    if (items.length === 0) {
+      return '';
+    }
+    return items.map((item: string): string => `· ${item}`).join('\n');
   }
 }

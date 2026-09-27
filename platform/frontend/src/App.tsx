@@ -104,6 +104,9 @@ export default function App() {
   const [docFiles, setDocFiles] = useState<File[]>([]);
   const [docResult, setDocResult] = useState<DocCheckResponse | null>(null);
   const [loadingDoc, setLoadingDoc] = useState(false);
+  // Defaults to local: online mode sends the requirement text and material
+  // excerpts to a model service, so it stays an explicit user choice.
+  const [docProcessingMode, setDocProcessingMode] = useState<ProcessingMode>('local');
 
   const [selectedHistoryRecord, setSelectedHistoryRecord] = useState<HistoryRecord | null>(null);
   const [fixedCode, setFixedCode] = useState<string | null>(null);
@@ -282,7 +285,7 @@ export default function App() {
     setLoadingDoc(true);
     setError('');
     try {
-      const result = await checkDoc(docRequirement, docFiles);
+      const result = await checkDoc(docRequirement, docFiles, docProcessingMode);
       setDocResult(result);
       await refreshHistory();
     } catch (err) {
@@ -446,7 +449,7 @@ export default function App() {
                           <div className="mini-score"><small>最近评分</small><strong>{status.score}</strong><span>/ 100</span></div>
                         </div>
                         <div className="dashboard-module-footer">
-                          <span>{module.id === 'privacy' || module.id === 'code' ? '本地处理 / 联网增强可选' : '本地静态检测'}</span>
+                          <span>{module.id === 'link' ? '本地静态检测' : '本地规则 / 联网增强可选'}</span>
                           <button onClick={() => setPage(module.id)}>开始检测 <b>→</b></button>
                         </div>
                       </article>
@@ -473,7 +476,7 @@ export default function App() {
                       <div className="distribution-legend"><p><i className="high" /> 高风险 <b>{riskCounts.high}</b></p><p><i className="medium" /> 中风险 <b>{riskCounts.medium}</b></p><p><i className="low" /> 低风险 <b>{riskCounts.low}</b></p></div>
                     </div>
                   </section>
-                  <section className="card privacy-note"><strong>◆ 安全与隐私说明</strong><p>默认采用本地处理。仅当你主动选择联网增强时，相关图片或代码才会发送至已配置的模型服务；链接与提交材料始终本地检查。</p></section>
+                  <section className="card privacy-note"><strong>◆ 安全与隐私说明</strong><p>默认采用本地规则。仅当你主动选择联网增强时，相关图片、代码，或提交要求与材料正文节选才会发送至后端并可能由已配置的模型服务处理；链接始终只在本地检查。</p></section>
                 </aside>
               </div>
               <footer className="rules-footer"><span>◇ 本地规则为基础，可按需选择联网增强</span><span>当前历史记录：{mergedHistory.length} 条</span></footer>
@@ -543,9 +546,11 @@ export default function App() {
           files={docFiles}
           result={docResult}
           loading={loadingDoc}
+          processingMode={docProcessingMode}
           onBack={() => setPage('home')}
           onRequirementChange={setDocRequirement}
           onFilesChange={setDocFiles}
+          onProcessingModeChange={setDocProcessingMode}
           onCheck={handleDocCheck}
         />
       )}

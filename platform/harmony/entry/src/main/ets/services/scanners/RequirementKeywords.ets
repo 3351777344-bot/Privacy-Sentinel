@@ -446,6 +446,12 @@ const WEAK_MESSAGE: string =
   + 'PDF/Word/压缩包、封面/正文/参考文献/源码/截图/PPT、命名规则：学号_姓名、'
   + '不少于 3000 字、截止 2026年12月31日 这类原词。';
 
+/** Appended to the pre-check hint while the online mode is selected. */
+const ONLINE_HINT_SUFFIX: string =
+  ' 当前是联网增强模式：提交后由在线 AI 直接读原文抽取格式、命名、材料清单、'
+  + '篇幅和内容要求，材料正文由 AI 逐条核对；因此文字与上面这些原词不同也能识别，'
+  + '不必为了触发检查而改写要求。';
+
 /** Advisory pre-check of a submission brief. */
 export function precheck(text: string): RequirementHint {
   const trimmed: string = text.trim();
@@ -513,4 +519,28 @@ export function precheck(text: string): RequirementHint {
     tags: tags
   };
   return ok;
+}
+
+/**
+ * Add the online-mode sentence to a pre-check hint.
+ *
+ * The advice above is written for the keyword table, which can only read the
+ * brief the way it was typed: when it recognises nothing it tells the user to
+ * rewrite the text with the expected words. In online mode that advice is
+ * actively wrong — reading prose is exactly what the model is for — and a user
+ * who reads it will go and retype a brief that would have worked. So the hint
+ * gains one sentence naming the trade-off, and the original advice is kept for
+ * *partial* recognition, where the model may still miss a rule the table would
+ * have read exactly.
+ *
+ * Pure and export-only so the Node harness can pin the wording; it does not
+ * belong in `parseRequirement`, which is contract-pinned.
+ */
+export function decorateHintForOnline(hint: RequirementHint): RequirementHint {
+  const online: RequirementHint = {
+    level: hint.level,
+    message: `${hint.message}${ONLINE_HINT_SUFFIX}`,
+    tags: hint.tags
+  };
+  return online;
 }

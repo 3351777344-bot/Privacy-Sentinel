@@ -17,7 +17,7 @@ import { ThreatScanner } from './.build/services/ThreatScanner.ts';
 import { HashBlacklist } from './.build/services/scanners/HashBlacklist.ts';
 import { sha256Hex } from './.build/services/scanners/Sha256.ts';
 import { analyzePe } from './.build/services/scanners/PEAnalyzer.ts';
-import { containsAlias, precheck } from './.build/services/scanners/RequirementKeywords.ts';
+import { containsAlias, decorateHintForOnline, precheck } from './.build/services/scanners/RequirementKeywords.ts';
 import {
   checkFormats,
   extractNamingRule,
@@ -443,6 +443,35 @@ check(
 );
 
 check('空要求判为 weak', hintOf('   ').level === 'weak', hintOf('   ').level);
+
+// The online-mode hint must *add* to the raw hint, never replace or soften it.
+// The raw advice tells the user to rewrite the brief with keywords the local
+// table knows; in online mode the model reads the prose, so that advice is
+// misleading and the extra sentence is the only thing that corrects it.
+const weakRaw = hintOf('提交论文和相关材料');
+const weakOnline = decorateHintForOnline(weakRaw);
+check(
+  '联网提示在原始提示之后追加一句，不替换原文',
+  weakOnline.message.startsWith(weakRaw.message)
+    && weakOnline.message.length > weakRaw.message.length
+    && weakOnline.message.includes('联网增强'),
+  `raw=${weakRaw.message.length} online=${weakOnline.message.length}`
+);
+check(
+  '联网提示保留级别与标签，且不改动入参',
+  weakOnline.level === weakRaw.level
+    && weakOnline.tags.join(',') === weakRaw.tags.join(',')
+    && weakRaw.message === hintOf('提交论文和相关材料').message,
+  `${weakOnline.level} / tags=${weakOnline.tags.join(',')}`
+);
+const okOnline = decorateHintForOnline(explicitCase);
+check(
+  '已识别要求时联网提示同样追加而保留识别结果',
+  okOnline.level === 'ok'
+    && okOnline.tags.includes('命名规则')
+    && okOnline.message.startsWith(explicitCase.message),
+  `${okOnline.level} / ${okOnline.message.length}`
+);
 
 check(
   '截止时间可识别',

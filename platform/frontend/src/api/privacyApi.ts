@@ -15,6 +15,10 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001
 const FETCH_TIMEOUT_MS = 30_000; // 30 seconds
 const DETECT_LOCAL_TIMEOUT_MS = 60_000;
 const DETECT_ONLINE_TIMEOUT_MS = 120_000;
+// Online mode asks the server for two model calls (requirement parse, then a
+// content verdict per requirement), so the doc call needs the same headroom the
+// other model-backed endpoints get rather than the 30 s default.
+const DOC_ONLINE_TIMEOUT_MS = 120_000;
 
 async function fetchWithTimeout(input: RequestInfo, init?: RequestInit, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
   if (init?.method === 'POST') {
@@ -200,14 +204,23 @@ export async function exportCode(code: string, language: string, filename?: stri
   URL.revokeObjectURL(url);
 }
 
-export async function checkDoc(requirementText: string, files: File[]): Promise<DocCheckResponse> {
+export async function checkDoc(
+  requirementText: string,
+  files: File[],
+  processingMode: ProcessingMode = 'local'
+): Promise<DocCheckResponse> {
   const formData = new FormData();
   formData.append('requirement_text', requirementText);
+  formData.append('processing_mode', processingMode);
   files.forEach((file) => formData.append('files', file));
 
-  const response = await fetchWithTimeout(`${API_BASE_URL}/api/doc/check`, {
-    method: 'POST',
-    body: formData
-  });
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}/api/doc/check`,
+    {
+      method: 'POST',
+      body: formData
+    },
+    processingMode === 'online' ? DOC_ONLINE_TIMEOUT_MS : FETCH_TIMEOUT_MS
+  );
   return parseResponse<DocCheckResponse>(response);
 }

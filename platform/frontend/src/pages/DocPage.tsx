@@ -1,27 +1,43 @@
 import DocReportPanel from '../components/DocReportPanel';
-import { PageHero } from '../components/PageComponents';
-import type { DocCheckResponse } from '../types/privacy';
+import { PageHero, ProcessingModeSelector } from '../components/PageComponents';
+import type { DocCheckResponse, ProcessingMode } from '../types/privacy';
 
 interface DocPageProps {
   requirement: string;
   files: File[];
   result: DocCheckResponse | null;
   loading: boolean;
+  processingMode: ProcessingMode;
   onBack: () => void;
   onRequirementChange: (value: string) => void;
   onFilesChange: (files: File[]) => void;
+  onProcessingModeChange: (mode: ProcessingMode) => void;
   onCheck: () => Promise<void>;
 }
 
 export default function DocPage(props: DocPageProps) {
+  const online = props.processingMode === 'online';
   return (
     <>
       <PageHero eyebrow="Doc Shield" title="Doc Shield 提交护盾" copy="按“输入提交要求 + 上传材料 + 生成提交检查报告”的流程，检查材料完整性、格式规范、隐私风险、提交建议和安全评分。" onBack={props.onBack} />
       <div className="tool-grid doc-tool-grid">
         <section className="card form-card doc-form-card">
           <div className="section-title"><span>01</span><div><h3>提交要求与材料上传</h3><p>支持 txt、md、pdf、docx 内容解析；图片和压缩包会先检查文件名、后缀和上传状态。</p></div></div>
-          <div className="local-mode-banner"><strong>本地材料检查</strong><span>文件内容仅在本机解析，不会上传到第三方模型服务</span></div>
+          <div className="local-mode-banner">
+            <strong>{online ? '联网增强检查' : '本地规则检查'}</strong>
+            <span>
+              {online
+                ? '上传的材料正文（节选）与提交要求会发送到后端，由已配置的模型识别要求并核对内容；失败时自动回退本地规则。'
+                : '不调用模型，由后端规则表解析要求；上传的材料仅用于本次检查。'}
+            </span>
+          </div>
           <textarea value={props.requirement} onChange={(event) => props.onRequirementChange(event.target.value)} placeholder="粘贴课程论文、比赛材料、报名附件等提交要求" />
+          <ProcessingModeSelector
+            value={props.processingMode}
+            onChange={props.onProcessingModeChange}
+            localLabel={{ title: '本地规则', hint: '规则表解析要求 不调用模型' }}
+            onlineLabel={{ title: '联网增强', hint: '大模型识别要求与内容' }}
+          />
           <label className={`upload-box doc-upload-box ${props.files.length ? 'has-file' : ''}`}>
             <input multiple type="file" accept=".txt,.md,.pdf,.docx,.png,.jpg,.jpeg,.zip,.rar,.ppt,.pptx" onChange={(event) => props.onFilesChange(Array.from(event.target.files ?? []))} />
             <span className="upload-icon">+</span>
@@ -56,7 +72,7 @@ export default function DocPage(props: DocPageProps) {
           )}
           <div className="capability-list"><span>要求解析</span><span>完整性检查</span><span>格式规范</span><span>隐私风险</span></div>
           <button className="primary-button" disabled={props.loading || !props.requirement.trim() || props.files.length === 0} onClick={props.onCheck}>
-            {props.loading ? '检查中...' : '生成提交检查报告'}
+            {props.loading ? '检查中...' : online ? '生成联网增强检查报告' : '生成提交检查报告'}
           </button>
         </section>
         <DocReportPanel result={props.result} />
