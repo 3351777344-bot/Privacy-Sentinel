@@ -2,9 +2,11 @@
 
 GuardianHub 在 HarmonyOS 系统分享菜单中接收图片、链接、代码和文件，先执行端侧检查，再由用户决定是否继续分享或授权增强分析。它是分享目标，不是系统级拦截器；未命中规则不代表安全。
 
-## 当前验收状态
+## 当前状态
 
-本次改进基于 ebf6e37，位于 codex/contest-release-hardening。工程验证与比赛发布验收分开：当前可以构建未签名调试 HAP；正式签名、真实设备分享回归、生产 HTTPS 服务和演示视频尚待完成。不得将此状态描述为已具备正式参赛提交条件。
+发布签名 HAP 由 `platform/harmony/BUILD_AND_SIGN.md` 的流程在本机构建（产物与哈希清单不入库）；
+生产后端已部署在 `https://api.guardianhub.tech`；真实设备分享回归与演示视频尚待完成。
+不得将此状态描述为已具备正式参赛提交条件。
 
 ## 数据处理边界
 
@@ -47,11 +49,11 @@ cd ../harmony
 
 ## 交付文档
 
-- [工程基线](platform/docs/工程基线报告.md)
-- [部署与签名配置](platform/docs/部署配置说明.md)
-- [鸿蒙能力边界](platform/docs/鸿蒙能力说明.md)
-- [项目说明](platform/docs/项目介绍文档.md)
-- [验收报告](platform/docs/验收报告.md)
-- [比赛材料目录](submission/README.md)
+本仓库只保留代码与开发文档。比赛提交材料（项目说明、功能清单、数据流与隐私说明、演示脚本、
+版本说明、验收报告、能力说明、接口文档等）单独存放，不随代码提交。
+
+- 构建与签名：[platform/harmony/BUILD_AND_SIGN.md](platform/harmony/BUILD_AND_SIGN.md)
+- 平台开发说明：[platform/README.md](platform/README.md)
+- 发布自检：`python tools/release-check.py`（清单与产物通过 `GUARDIANHUB_DELIVERY_DIR` 指向交付目录）
 
 签名密码曾进入 Git 历史。当前配置已清理，但历史仍需持有人安排凭据轮换和历史处置。不要把真实凭据或证书写入版本库。

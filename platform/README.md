@@ -30,7 +30,7 @@ python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - `POST /api/doc/check`：提交材料检查
 - `GET /api/history`：本地历史记录
 
-完整字段见 [docs/接口文档.md](docs/接口文档.md)。
+完整字段以 `platform/backend/schemas/models.py` 为准（接口文档随提交材料单独存放，不在本仓库内）。
 
 ## PC Web
 

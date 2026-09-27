@@ -4,25 +4,26 @@ Two invariants are enforced here, both of which used to be asserted by prose
 instead of by code:
 
 * no signing secret is present in a tracked config file;
-* every artifact claimed in ``submission/release/SHA256SUMS.txt`` exists and
-  really hashes to the recorded digest — and, conversely, no tracked file in
-  that directory is left out of the manifest.
+* every artifact claimed in the release manifest exists and really hashes to the
+  recorded digest, and no extra binary is tracked under the release directory.
 
-``*.hap`` is gitignored, so the manifest can never ship the binary itself. A
-recorded path is resolved against the repository root, the documented Harmony
-build output directory, and ``submission/release`` — the same places
-``--write`` reads from.
+``*.hap`` is gitignored, so the manifest can never ship the binary itself.
+Artifacts and the manifest live outside the repository (submission materials are
+kept separate from project code); set ``GUARDIANHUB_DELIVERY_DIR`` to point at
+that directory — it defaults to ``<home>/GuardianHub-delivery``.
 """
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-MANIFEST = Path("submission/release/SHA256SUMS.txt")
+DELIVERY = Path(os.environ.get("GUARDIANHUB_DELIVERY_DIR") or (Path.home() / "GuardianHub-delivery"))
+MANIFEST = Path("submission-materials/release/SHA256SUMS.txt")
 # Documentation that legitimately lives beside the manifest and is not an artifact.
 NON_ARTIFACTS = {"RELEASE_NOTES.md"}
 # Artifacts are gitignored; this is where the build actually drops them.
@@ -39,10 +40,11 @@ def resolve_artifact(name: str) -> Path | None:
     relative = Path(name)
     candidates = [root / relative]
     if len(relative.parts) > 1:
-        # A submission-time copy path such as ``release/x.hap`` may instead be
+        # A delivery-time copy path such as ``release/x.hap`` may instead be
         # relative to where the build drops it.
         candidates.append(root / HARMONY_OUTPUT / relative.name)
-    candidates.append(root / "submission" / "release" / relative.name)
+    candidates.append(DELIVERY / MANIFEST.parent / relative.name)
+    candidates.append(DELIVERY / relative.name)
     for candidate in candidates:
         if candidate.is_file():
             return candidate
@@ -57,17 +59,23 @@ def artifact_digest(path: Path) -> str:
     return digest.hexdigest().upper()
 
 
+def manifest_path() -> Path:
+    """The manifest lives with the delivery materials, outside the repository."""
+    return DELIVERY / MANIFEST
+
+
 def read_manifest() -> list[tuple[str, str]]:
     entries: list[tuple[str, str]] = []
-    for number, line in enumerate(MANIFEST.read_text(encoding="utf-8").splitlines(), start=1):
+    path = manifest_path()
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
             continue
         match = MANIFEST_ENTRY.match(line)
         if match is None:
-            raise ValueError(f"{MANIFEST}:{number} 不是合法的 sha256sum 行：{line!r}")
+            raise ValueError(f"{path}:{number} 不是合法的 sha256sum 行：{line!r}")
         entries.append((match.group(1).upper(), match.group(2)))
     if not entries:
-        raise ValueError(f"{MANIFEST} 存在但没有内容；请用 tools/release-check.py --write 生成")
+        raise ValueError(f"{path} 存在但没有内容；请用 tools/release-check.py --write 生成")
     return entries
 
 
@@ -79,9 +87,10 @@ def write_manifest(names: list[str]) -> int:
             print(f"无法生成清单：找不到产物 {name}", file=sys.stderr)
             return 1
         lines.append(f"{artifact_digest(artifact)}  {name}")
-    MANIFEST.parent.mkdir(parents=True, exist_ok=True)
-    (root / MANIFEST).write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"{MANIFEST} 已写入 {len(lines)} 条（对应磁盘上的真实产物）。")
+    path = manifest_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"{path} 已写入 {len(lines)} 条（对应磁盘上的真实产物）。")
     return 0
 
 
@@ -107,10 +116,10 @@ def check_artifacts(paths: list[str]) -> tuple[list[str], list[str]]:
     for name in paths:
         if Path(name).suffix.lower() in (".hap", ".hsp", ".har"):
             failures.append(f"{name}: build artifact must stay gitignored, not tracked")
-    if not (root / MANIFEST).exists():
+    if not manifest_path().exists():
         notes.append(
-            f"{MANIFEST} 不存在：尚未生成本次发布的产物清单"
-            "（执行 tools/release-check.py --write 生成；CI 校验它一旦存在的内容）。"
+            f"{manifest_path()} 不存在：尚未生成本次发布的产物清单"
+            "（执行 tools/release-check.py --write 生成；交付材料与清单都在仓库之外）。"
         )
         return failures, notes
 
@@ -120,36 +129,28 @@ def check_artifacts(paths: list[str]) -> tuple[list[str], list[str]]:
         failures.append(str(error))
         return failures, notes
 
-    recorded = {name for _, name in entries}
     for digest, name in entries:
         artifact = resolve_artifact(name)
         if artifact is None:
             failures.append(
-                f"{MANIFEST}: 记录的产物 {name} 在本机找不到"
-                f"（查找位置：仓库根、{HARMONY_OUTPUT}、submission/release）"
+                f"{manifest_path()}: 记录的产物 {name} 在本机找不到"
+                f"（查找位置：仓库根、{HARMONY_OUTPUT}、{DELIVERY}）"
             )
             continue
         actual = artifact_digest(artifact)
         if actual != digest:
-            failures.append(f"{MANIFEST}: {name} 实际 SHA-256 {actual} != 记录 {digest}")
+            failures.append(f"{manifest_path()}: {name} 实际 SHA-256 {actual} != 记录 {digest}")
         else:
             notes.append(f"{name} 校验通过：{artifact.stat().st_size} 字节，SHA-256 {actual}")
-
-    manifest_name = MANIFEST.as_posix()
-    for name in paths:
-        parent = Path(name).parent.as_posix()
-        if parent != "submission/release" or name == manifest_name:
-            continue
-        if Path(name).name in NON_ARTIFACTS or Path(name).name in recorded:
-            continue
-        failures.append(f"{MANIFEST}: 已跟踪的 {name} 既不是清单条目也不是说明文档")
     return failures, notes
 
 
 def check_readme_links() -> list[str]:
     failures: list[str] = []
-    for name in ["README.md", "submission/README.md"]:
+    for name in ["README.md", "platform/README.md"]:
         path = root / name
+        if not path.is_file():
+            continue
         for target in re.findall(r"\]\(([^)]+)\)", path.read_text(encoding="utf-8")):
             if "://" in target or target.startswith("#"):
                 continue
