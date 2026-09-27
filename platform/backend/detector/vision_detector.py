@@ -5,9 +5,27 @@ import re
 from pathlib import Path
 
 from config import settings
+from model_retry import ModelCallResult, call_with_retry
 from schemas.models import Box, PrivacyItem
 
 logger = logging.getLogger(__name__)
+
+# Why the vision call failed, from the outside. Set on every call that returns
+# no items and on every successful one, so it always describes the most recent
+# attempt. The detector copies it into the response's internal diagnostics
+# field: that is what makes a failure diagnosable from the client response
+# without shell access to the server log.
+_LAST_ERROR = ""
+
+
+def _record_call_error(error: str) -> None:
+    global _LAST_ERROR
+    _LAST_ERROR = error
+
+
+def _last_call_error() -> str:
+    return _LAST_ERROR
+
 
 # Vision detection runs on the same DeepSeek V4.1 Flash model as the rest of the
 # backend. The legacy `deepseek-v4-flash-vision-exp` name is retired and served by
@@ -190,72 +208,108 @@ def _normalized_to_pixel(bbox_2d: list[float], img_w: int, img_h: int) -> Box:
     return Box(x=left, y=top, width=w, height=h)
 
 
-def _call_deepseek_vision(image_path: str) -> list[dict]:
+def _vision_request(image_path: str, prompt: str) -> tuple[str, str | None]:
+    """One vision completion: send the encoded image plus ``prompt``.
+
+    Returns ``(content, finish_reason)``. Kept separate from the parsing below so
+    the transport call is the only thing the retry policy wraps: a parse failure
+    is deterministic, and retrying it would only spend model quota twice on the
+    same unusable answer.
+    """
+    base64_image, mime_type = _encode_image_for_vision(image_path)
+    client = _vision_client()
+    # No response_format on purpose: the prompt already demands JSON and
+    # _extract_json_payload tolerates markdown fences. Sending JSON mode with an
+    # image part is rejected by some OpenAI-compatible providers, and a direct
+    # curl call to DeepSeek (without it) reads the image correctly.
+    response = client.chat.completions.create(
+        model=_vision_model(),
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime_type};base64,{base64_image}"},
+                    },
+                    {"type": "text", "text": prompt},
+                ],
+            },
+        ],
+        max_tokens=_vision_max_tokens(),
+        temperature=0.1,
+    )
+    choice = response.choices[0]
+    finish_reason = getattr(choice, "finish_reason", None)
+    if finish_reason == "length":
+        # The answer was cut off before the JSON closed, which no amount of
+        # parsing can rescue; the token ceiling needs raising (see
+        # GUARDIANHUB_DEEPSEEK_MAX_TOKENS in .env.example).
+        usage = getattr(response, "usage", None)
+        logger.warning(
+            "DeepSeek vision answer hit the token ceiling (completion_tokens=%s)",
+            getattr(usage, "completion_tokens", None),
+        )
+    return choice.message.content or "", finish_reason
+
+
+def _call_vision(image_path: str, prompt: str, label: str) -> ModelCallResult:
+    """Run one vision call under the shared retry policy."""
     if not settings.deepseek_enabled or not settings.deepseek_api_key:
+        reason = "disabled: 视觉增强未启用或未配置密钥"
         logger.warning("DeepSeek vision API disabled or missing API key")
-        return []
+        _record_call_error(reason)
+        return ModelCallResult(error=reason)
 
     try:
         from openai import OpenAI  # noqa: F401
     except ImportError:
+        reason = "dependency_missing: openai 包未安装"
         logger.warning("openai package not installed, DeepSeek vision API unavailable")
+        _record_call_error(reason)
+        return ModelCallResult(error=reason)
+
+    result: ModelCallResult = call_with_retry(
+        lambda: _vision_request(image_path, prompt),
+        label=label,
+    )
+    _record_call_error(result.error)
+    return result
+
+
+def _parse_unusable_error(content: str, finish_reason: str | None) -> str:
+    return (
+        f"unparseable_response | finish_reason={finish_reason} | "
+        f"content={content.strip()[:200] or '<empty>'}"
+    )
+
+
+def _call_deepseek_vision(image_path: str) -> list[dict]:
+    """Vision-first detection: return the raw item list, or ``[]`` with the reason kept.
+
+    A failure is never silent — ``_last_call_error()`` holds the reason right
+    after this returns.
+    """
+    result = _call_vision(image_path, _PRIVACY_DETECTION_PROMPT, "DeepSeek vision privacy analysis")
+    if result.error:
         return []
 
-    try:
-        base64_image, mime_type = _encode_image_for_vision(image_path)
-        client = _vision_client()
-        request: dict = {
-            "model": _vision_model(),
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{mime_type};base64,{base64_image}"},
-                        },
-                        {"type": "text", "text": _PRIVACY_DETECTION_PROMPT},
-                    ],
-                },
-            ],
-            "max_tokens": _vision_max_tokens(),
-            "temperature": 0.1,
-        }
-        # No response_format here on purpose: the prompt already demands JSON and
-        # _extract_json_payload tolerates markdown fences. Sending JSON mode with an
-        # image part is rejected by some OpenAI-compatible providers, and a direct
-        # curl call to DeepSeek (without it) reads the image correctly.
-
-        response = client.chat.completions.create(**request)
-        choice = response.choices[0]
-        content = choice.message.content
-        payload = _extract_json_payload(content or "")
-        if payload is None:
-            usage = getattr(response, "usage", None)
-            logger.warning(
-                "DeepSeek vision returned unparseable content (finish_reason=%s, "
-                "completion_tokens=%s, first 200 chars): %r",
-                getattr(choice, "finish_reason", None),
-                getattr(usage, "completion_tokens", None),
-                (content or "")[:200],
-            )
-            return []
-        if isinstance(payload, dict):
-            return payload.get("items", [])
-        return []
-    except Exception as exc:
-        # Include the exception type and any HTTP status/body so a provider-side
-        # rejection is diagnosable from the service log alone.
-        status = getattr(exc, "status_code", None)
-        body = getattr(exc, "response", None)
-        detail = ""
-        if body is not None:
-            detail = f" body={str(getattr(body, 'text', body))[:300]}"
-        logger.error(
-            "DeepSeek vision API call failed: %s: %s (status=%s)%s",
-            type(exc).__name__, exc, status, detail,
+    content, finish_reason = result.value if isinstance(result.value, tuple) else ("", None)
+    payload = _extract_json_payload(content)
+    if payload is None:
+        # A truncated answer (finish_reason=length) and a prose answer look the
+        # same from here, so the reason records both the stop reason and the head
+        # of what actually came back.
+        logger.warning(
+            "DeepSeek vision returned unparseable content (finish_reason=%s, first 200 chars): %r",
+            finish_reason,
+            content[:200],
         )
+        _record_call_error(_parse_unusable_error(content, finish_reason))
         return []
+    if isinstance(payload, dict):
+        return payload.get("items", [])
+    return []
 
 
 def _parse_vision_items(raw_items: list[dict], image_id: str, img_w: int, img_h: int) -> list[PrivacyItem]:
@@ -338,20 +392,8 @@ def enhance_with_vision(
     img_h: int,
 ) -> list[PrivacyItem]:
     """Hybrid mode: send the image to DeepSeek vision alongside local OCR results."""
-    if not settings.deepseek_enabled or not settings.deepseek_api_key:
-        return local_items
-
-    try:
-        from openai import OpenAI  # noqa: F401
-    except ImportError:
-        return local_items
-
-    try:
-        base64_image, mime_type = _encode_image_for_vision(image_path)
-        client = _vision_client()
-
-        ocr_context = _build_ocr_context(local_items)
-        prompt = f"""Check this image for privacy risks. Local OCR already found:
+    ocr_context = _build_ocr_context(local_items)
+    prompt = f"""Check this image for privacy risks. Local OCR already found:
 {ocr_context}
 
 Return ONLY JSON:
@@ -368,39 +410,28 @@ Return ONLY JSON:
 }}
 Verify OCR hits, add missed risks only. Empty arrays if nothing new. JSON only."""
 
-        request: dict = {
-            "model": _vision_model(),
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{mime_type};base64,{base64_image}"},
-                        },
-                        {"type": "text", "text": prompt},
-                    ],
-                },
-            ],
-            "max_tokens": _vision_max_tokens(),
-            "temperature": 0.1,
-        }
-        # See _call_deepseek_vision: JSON mode is omitted because some
-        # OpenAI-compatible providers reject it alongside an image part.
+    # Shares the retry policy with vision-first detection, so a transient
+    # provider hiccup no longer silently drops the verification pass. Disabled /
+    # missing-dependency / failed calls all fall back to the local items.
+    result = _call_vision(image_path, prompt, "DeepSeek vision hybrid verification")
+    if result.error:
+        return local_items
 
-        response = client.chat.completions.create(**request)
-        content = response.choices[0].message.content
-        payload = _extract_json_payload(content or "")
-        if payload is None:
-            logger.error(
-                "Failed to parse hybrid DeepSeek vision response (first 200 chars): %r",
-                (content or "")[:200],
-            )
-            return local_items
+    content, finish_reason = result.value if isinstance(result.value, tuple) else ("", None)
+    payload = _extract_json_payload(content)
+    if payload is None:
+        logger.warning(
+            "Failed to parse hybrid DeepSeek vision response (finish_reason=%s, first 200 chars): %r",
+            finish_reason,
+            content[:200],
+        )
+        _record_call_error(_parse_unusable_error(content, finish_reason))
+        return local_items
 
-        if not isinstance(payload, dict):
-            return local_items
+    if not isinstance(payload, dict):
+        return local_items
 
+    try:
         verified_map: dict[str, str] = {}
         for verified in payload.get("verified", []):
             vid = verified.get("id", "")
@@ -424,6 +455,6 @@ Verify OCR hits, add missed risks only. Empty arrays if nothing new. JSON only."
 
         new_items = _parse_vision_items(payload.get("new_items", []), image_id, img_w, img_h)
         return _merge_vision_items(updated_items, new_items)
-    except Exception as exc:
-        logger.error("Hybrid DeepSeek vision call failed: %s", exc)
+    except Exception as exc:  # noqa: BLE001 - a malformed answer must not fail the request
+        logger.warning("Hybrid vision answer could not be applied: %s", exc)
         return local_items

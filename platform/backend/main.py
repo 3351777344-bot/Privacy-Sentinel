@@ -369,6 +369,14 @@ def process_privacy_image(request: PrivacyProcessRequest) -> MaskResponse:
         selected_items = [item for item in detection.items if item.id in selected_ids]
 
     if not selected_items:
+        # A detection that stored no items is the one outcome with nothing to
+        # mask; say that plainly instead of implying the user forgot to pick
+        # regions, which they never had the chance to do.
+        if not detection.items:
+            raise HTTPException(
+                status_code=400,
+                detail="本机未识别到可遮挡的隐私区域，无法生成安全预览。",
+            )
         raise HTTPException(status_code=400, detail="尚未选择需要处理的隐私区域。")
 
     mask_type = _valid_mask_type(request.maskType)

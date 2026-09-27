@@ -250,7 +250,7 @@ def _detect_vision_api(
     width: int,
     height: int,
 ) -> DetectResponse:
-    from .vision_detector import detect_with_vision
+    from .vision_detector import detect_with_vision, _last_call_error
 
     vision_items = detect_with_vision(image_path, image_id, width, height)
     if not vision_items:
@@ -258,15 +258,22 @@ def _detect_vision_api(
         if _vision_active():
             # The model was reachable but unusable: genuine failure, so say so.
             fallback_message = "联网图像分析调用失败，已保留本机识别结果。"
+            # The user-facing sentence is deliberately free of internals; the
+            # actual provider rejection travels in the response's diagnostics
+            # field, so a failing deployment can be told apart from a working one
+            # by calling the API instead of reading the server log over SSH.
+            diagnostics = vision_detector_detail(_last_call_error())
         else:
             fallback_message = (
                 "联网图像分析未启用，本次仅在本机与服务端规则内完成检查；"
                 "图像已上传到服务端，未发送给外部模型。"
             )
+            diagnostics = "vision_disabled"
         return base_result.model_copy(
             update={
                 "detectorMode": "ocr",
                 "detectorMessage": fallback_message,
+                "detectorDetail": diagnostics,
                 "items": items,
                 "riskLevel": highest_risk([i.riskLevel for i in items]),
                 "score": calculate_security_score([i.riskLevel for i in items]),
@@ -291,8 +298,21 @@ def _detect_vision_api(
         summary=f"已完成图片内容分析，共检测到 {len(deduped)} 个隐私区域（{labels}）。请确认并处理后再分享。",
         detectorMode="vision_api",
         detectorMessage="已完成图片内容分析，并合并本机文字识别结果。",
+        detectorDetail="ok",
         items=deduped,
     )
+
+
+def vision_detector_detail(recorded_error: str) -> str:
+    """Diagnostics for a vision run that produced no items.
+
+    An empty error with no items is the model's own verdict ("this image has no
+    privacy findings"), which is a normal outcome and must not be reported as a
+    failure the user should retry.
+    """
+    if recorded_error:
+        return recorded_error
+    return "empty_result: 模型返回空结果（图片可能确无敏感内容，或本次未识别到）"
 
 
 def _vision_active() -> bool:

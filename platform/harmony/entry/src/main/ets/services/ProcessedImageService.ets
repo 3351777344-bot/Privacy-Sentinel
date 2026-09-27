@@ -3,7 +3,7 @@ import { fileIo, fileUri } from '@kit.CoreFileKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { ShareOutService } from './ShareOutService';
 import { image } from '@kit.ImageKit';
-import { QrImageReport, QrRect } from './QrRules';
+import { QrClassification, QrImageReport, QrRect } from './QrRules';
 import { PixelMask } from './PixelMask';
 import { GuardianApi } from './GuardianApi';
 
@@ -12,6 +12,32 @@ export class ProcessedImageService {
     if (report.status !== 'decoded' || report.codes.some((code): boolean => code.rect === undefined)) {
       throw new Error('没有全部二维码的可靠坐标，无法自动遮挡；请手动编辑原图。');
     }
+    return ProcessedImageService.maskRects(context, uri, report.codes.map((code): QrRect => code.rect as QrRect));
+  }
+
+  /**
+   * Local QR-only preview: opaque black blocks over the decoded code areas.
+   *
+   * This is the one masking the device can always do by itself, so it is also
+   * the floor a failed online enhancement can fall back to — a locked preview
+   * was worse than a preview that says exactly which areas it covers.
+   * Text and people stay uncovered: the device has no OCR or face model.
+   */
+  static async maskQrCodesLocally(context: common.UIAbilityContext, uri: string,
+    report: QrImageReport): Promise<string> {
+    const rects: QrRect[] = [];
+    report.codes.forEach((code: QrClassification): void => {
+      if (code.rect === undefined) { return; }
+      const rect = code.rect as QrRect;
+      if (rect.right - rect.left >= 4 && rect.bottom - rect.top >= 4) { rects.push(rect); }
+    });
+    if (rects.length === 0) {
+      throw new Error('没有可靠的二维码坐标，无法在端侧生成预览。');
+    }
+    return ProcessedImageService.maskRects(context, uri, rects);
+  }
+
+  private static async maskRects(context: common.UIAbilityContext, uri: string, regions: QrRect[]): Promise<string> {
     const data = await GuardianApi.readSelectedFile(uri, 10 * 1024 * 1024);
     const source = image.createImageSource(data);
     const packer = image.createImagePacker();
@@ -22,7 +48,6 @@ export class ProcessedImageService {
       pixels = await source.createPixelMap({ editable: true, desiredPixelFormat: image.PixelMapFormat.RGBA_8888 });
       const buffer = new ArrayBuffer(info.size.width * info.size.height * 4);
       await pixels.readPixelsToBuffer(buffer);
-      const regions: QrRect[] = report.codes.map((code): QrRect => code.rect as QrRect);
       PixelMask.apply(new Uint8Array(buffer), info.size.width, info.size.height, regions);
       await pixels.writeBufferToPixels(buffer);
       const encoded = await packer.packing(pixels, { format: 'image/png', quality: 100 });

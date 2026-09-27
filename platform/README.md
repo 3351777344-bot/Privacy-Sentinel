@@ -27,7 +27,7 @@ python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - `POST /api/detect`、`/api/privacy/process`：图片检测与脱敏
 - `POST /api/code/analyze`：代码或项目 ZIP 扫描
 - `POST /api/link/check`、`/api/link/qr/decode`：链接与二维码检查
-- `POST /api/doc/check`：提交材料检查
+- `POST /api/doc/check`：提交材料检查（`processing_mode=local|online`，online 需 `X-Guardian-Consent: explicit`）
 - `GET /api/history`：本地历史记录
 
 完整字段以 `platform/backend/schemas/models.py` 为准（接口文档随提交材料单独存放，不在本仓库内）。
@@ -80,11 +80,54 @@ Copy-Item .env.example .env
 | 每客户端 `/api/*` 请求 | 600 次 / 60 秒 |
 | 每客户端模型调用 | 120 次 / 300 秒 |
 
-限流面向公网部署：后端没有账号鉴权，而 `/api/detect`、`/api/code/analyze`、`/api/code/fix`
-会消耗付费模型额度，所以这三条路径按客户端 IP 单独计额。上限刻意远高于真实用量
+限流面向公网部署：后端没有账号鉴权，而 `/api/detect`、`/api/code/analyze`、`/api/code/fix`、
+`/api/doc/check` 会消耗付费模型额度，所以这四条路径按客户端 IP 单独计额。上限刻意远高于真实用量
 （一次完整演示约 2–6 次模型调用），只用于拦截脚本洪水。可用 `GUARDIANHUB_RATE_LIMIT_ENABLED=false`
 整体关闭，或把某项额度设为 0 停用该项。客户端身份取 `X-Forwarded-For` 的**最后一段**
 （反向代理实际观察到的地址），首段由客户端自行填写、可伪造，取它等于形同虚设。
+
+`/api/doc/check` 只有 online 请求会真正调用模型，但额度是按路径选择的（模式藏在 multipart 请求体里，
+中间件不应读取请求体），所以它的两种模式都计入模型额度——这是把限流器保持为纯 ASGI 包装的代价。
+
+## 提交护盾的联网解析
+
+`processing_mode` 决定 `/api/doc/check` 用哪种方式读提交要求：
+
+| 模式 | 要求解析 | 材料核对 | 是否调用模型 |
+| --- | --- | --- | --- |
+| `local`（默认） | 规则表 + 关键词（`modules/doc_shield/requirement_parser.py`） | 格式、命名、材料关键词、字数、截止时间、隐私正则 | 否 |
+| `online` | 大模型读原文，抽格式/命名/材料清单/篇幅/截止时间/内容要求 | 在前者基础上，由模型对每条内容要求给出 满足/需确认/不满足 | 是（最多两次调用） |
+
+联网路径的两条硬性约束：
+
+- **逐字段回退。** 模型没给出的字段保留规则表的解析结果，所以一次只读懂一半的原文仍能产出完整报告；
+  模型完全读不懂时，`parsedRequirements.source` 保持 `local`，`modelWarning` 说明原因，报告与纯本地模式完全一致。
+- **不猜。** 服务端只认请求里的 `processing_mode`，不会因为「客户端大概开着联网」就调用模型；
+  online 请求缺少 `X-Guardian-Consent: explicit` 一律 403，与 `/api/detect`、`/api/code/analyze` 同一套写法。
+
+发给模型的是**提取出的纯文本节选**（每份材料 6000 字、合计 12000 字，见 `GUARDIANHUB_DOC_CONTENT_CHARS_*`），
+不是原文件；图片和压缩包提取不到正文时跳过内容判定，并提示转人工确认。字数和隐私检查仍在完整文本上运行。
+
+## 联网分析失败时怎么定位
+
+`POST /api/detect` 的响应里有两个容易混淆的字段，区别是「给用户看的」和「给运维看的」：
+
+| 字段 | 面向 | 内容 |
+| --- | --- | --- |
+| `detectorMessage` | 用户 | 只有结论，例如「联网图像分析调用失败，已保留本机识别结果。」，不含任何内部标识 |
+| `detectorDetail` | 运维/支持 | 真实原因，例如 `AuthenticationError \| HTTP 401 \| ...`、`APITimeoutError \| ...`、`unparseable_response \| finish_reason=length \| ...`；正常时为 `ok`，未启用时为 `vision_disabled`，模型确实没发现内容时为 `empty_result` |
+
+这条链路是「托管后端、从外部诊断」：用户可见的文案必须保持干净，而失败与成功原本从 API
+上完全看不出差别，所以原因必须落在响应里，而不是只能登服务器看日志。客户端**不渲染**该字段
+（隐私哨兵只把它记进用户自己的历史记录），它不是第二个消息通道。
+
+视觉调用在网络类失败（超时、连接中断、5xx、429）时会**自动重试一次**，其余失败（密钥、
+模型、不可解析的返回）立即降级为「保留本机识别结果」，以免重复消耗额度。策略与原因文案
+由 `backend/model_retry.py` 统一提供，`backend/tests/test_model_retry.py` 与
+`tests/test_vision_diagnostics.py` 固定住这两条契约。
+
+`GUARDIANHUB_DEEPSEEK_TIMEOUT_SECONDS` 是**单次**请求的超时：一次调用最多占用它两倍时间
+（首试 + 重试），客户端读超时必须大于这个总和。
 
 ## 测试与构建
 

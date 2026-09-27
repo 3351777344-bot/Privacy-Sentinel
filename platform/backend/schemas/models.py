@@ -36,6 +36,15 @@ class DetectResponse(BaseModel):
     summary: str
     detectorMode: DetectorMode
     detectorMessage: str
+    # Operator-facing diagnostics: why the online image analysis produced
+    # nothing (transport failure, provider status, unusable answer, or the
+    # model's own empty verdict), or "ok"/"vision_disabled".
+    #
+    # It exists because the hosted backend is diagnosed from the outside: the
+    # user-facing message must stay free of internals, and without this field a
+    # failed enhancement and a working one look identical from the API. Clients
+    # never render it — it is not a second message channel.
+    detectorDetail: Optional[str] = None
     items: List[PrivacyItem]
 
 
@@ -55,6 +64,12 @@ class PrivacyProcessRequest(BaseModel):
     scope: Literal["high", "all", "custom"] = "high"
     maskType: Optional[MaskType] = None
     itemIds: List[str] = Field(default_factory=list, max_length=100)
+    # Processing is normally only offered for regions the online analysis
+    # confirmed. When that analysis fails, a client may still ask to mask the
+    # regions the local pass did find — refusing to produce a preview at all was
+    # a dead end for the user. The flag must be explicit so a missing parameter
+    # can never silently downgrade the safety promise.
+    localPreview: bool = False
 
 
 class HistoryRecord(BaseModel):
@@ -198,6 +213,22 @@ class ParsedRequirements(BaseModel):
     lengthRequirement: Optional[str] = None
     deadline: Optional[str] = None
     rawText: str
+    # The fields below only carry meaning when the request ran the online pass.
+    # `source` stays "local" for the rule parser, so a client that never opts in
+    # sees exactly the payload it saw before.
+    source: Literal["local", "online"] = "local"
+    # Which fields the model actually supplied. Empty on the local path, and a
+    # field missing here fell back to the rule parse even in online mode.
+    sourceFields: List[str] = Field(default_factory=list)
+    # Substantive content requirements ("正文不少于3000字" / "需给出测试结论")
+    # that only the model can read out of prose. The rule parser has no
+    # counterpart for these.
+    contentRequirements: List[str] = Field(default_factory=list)
+    # One sentence about what the model found ambiguous, or None.
+    notes: str = ""
+    # Set when the online pass was attempted and did not land; the report was
+    # then produced by the local rules and says so.
+    modelWarning: Optional[str] = None
 
 
 class DocFileSummary(BaseModel):

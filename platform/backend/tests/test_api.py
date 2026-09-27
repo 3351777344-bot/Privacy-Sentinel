@@ -210,6 +210,79 @@ def test_privacy_process_uses_stored_detection_items(tmp_path, monkeypatch) -> N
     assert (processed / f"{image_id}_safe.png").exists()
 
 
+def _store_detection(image_id: str, items: list[PrivacyItem], uploads) -> None:
+    buffer = BytesIO()
+    Image.new("RGB", (100, 80), "white").save(buffer, format="PNG")
+    (uploads / f"{image_id}.png").write_bytes(buffer.getvalue())
+    main._save_detection_result(
+        DetectResponse(
+            imageId=image_id,
+            originalImageUrl=f"/static/uploads/{image_id}.png",
+            riskLevel="high" if items else "low",
+            score=75 if items else 100,
+            summary="test",
+            detectorMode="ocr",
+            detectorMessage="联网图像分析调用失败，已保留本机识别结果。",
+            detectorDetail="APITimeoutError | HTTP 504",
+            items=items,
+        )
+    )
+
+
+def test_local_preview_masks_the_stored_local_findings() -> None:
+    """After a failed enhancement the local regions must still be maskable.
+
+    Refusing to process at all left the user with a preview button that could
+    never work; the explicit flag is what keeps that fallback honest.
+    """
+    uploads = main.UPLOAD_DIR
+    processed = main.PROCESSED_DIR
+    image_id = "img_111111111111"
+    _store_detection(
+        image_id,
+        [
+            PrivacyItem(
+                id=f"{image_id}_qr_1",
+                type="qr_code",
+                label="二维码",
+                text="二维码内容已隐藏",
+                riskLevel="high",
+                box=Box(x=5, y=5, width=30, height=20),
+                suggestion="遮挡后再分享。",
+            )
+        ],
+        uploads,
+    )
+
+    response = client.post(
+        "/api/privacy/process",
+        json={
+            "imageId": image_id,
+            "scope": "all",
+            "maskType": "black",
+            "itemIds": [],
+            "localPreview": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["processedImageUrl"].endswith(f"{image_id}_safe.png")
+    assert (processed / f"{image_id}_safe.png").exists()
+
+
+def test_process_without_any_finding_says_so_plainly() -> None:
+    image_id = "img_222222222222"
+    _store_detection(image_id, [], main.UPLOAD_DIR)
+
+    response = client.post(
+        "/api/privacy/process",
+        json={"imageId": image_id, "scope": "all", "maskType": "black", "itemIds": []},
+    )
+
+    assert response.status_code == 400
+    assert "未识别到可遮挡的隐私区域" in response.json()["detail"]
+
+
 def test_non_privacy_history_can_be_persisted(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(main, "history_store", HistoryStore(tmp_path / "history.db"))
     response = client.post(

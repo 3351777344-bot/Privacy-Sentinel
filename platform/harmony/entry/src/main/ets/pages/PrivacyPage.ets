@@ -35,6 +35,13 @@ struct PrivacyPage {
   private qrReport: QrImageReport = QrRules.analyze([]);
   @State localComplete: boolean = false;
   @State resultMeta: string = '尚未检测';
+  /**
+   * Why the online image analysis produced nothing, straight from the server.
+   * Kept on screen next to the preview controls because the alternative is a
+   * dead end the user cannot act on: a failure that is only visible once is a
+   * failure nobody can report.
+   */
+  @State detectorDetail: string = '';
 
   private abilityContext(): common.UIAbilityContext {
     return this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -86,6 +93,7 @@ struct PrivacyPage {
     this.imageId = '';
     this.scanning = true;
     this.localComplete = false;
+    this.detectorDetail = '';
     try {
       this.qrReport = await QrContentService.decodeAll(imageUri);
       this.findings = this.qrReport.findings;
@@ -136,12 +144,19 @@ struct PrivacyPage {
     if (report.detectorMessage && report.detectorMessage.length > 0) {
       this.statusMessage = `${this.statusMessage}\n${report.detectorMessage}`;
     }
+    this.detectorDetail = report.detectorDetail !== undefined ? report.detectorDetail : '';
+    // The device cannot log free-form text (see PrivacyLogger), so a failed
+    // online analysis is recorded with the history entry instead: that is the
+    // user's own record, and it is where the reason stays reportable.
+    const historySummary = this.detectorDetail.length > 0 && this.detectorDetail !== 'ok'
+      ? `${report.summary}｜联网诊断：${this.detectorDetail}`
+      : report.summary;
     this.historyRecordId = await HistoryStore.add(this.abilityContext(), {
       module: 'privacy',
       moduleLabel: '隐私哨兵',
       riskLevel: report.riskLevel,
       score: report.score,
-      summary: report.summary,
+      summary: historySummary,
       sourceLabel: this.imageName,
       findings: this.findings,
       suggestions: this.findings.map((item: Finding): string => item.suggestion)
@@ -156,17 +171,11 @@ struct PrivacyPage {
         this.processedImageUri = await ProcessedImageService.maskLocal(this.abilityContext(), this.imageUri, this.qrReport);
         this.statusMessage = '已在端侧用不透明黑块遮挡全部二维码，未上传。文字和人物未遮挡，请放大复核。';
       } else if (this.imageId.length > 0 && this.processingMode !== 'local_only') {
-        const transfer = this.imageTransfer;
-        try {
-          const masked = await GuardianApi.processAndDownloadImage(
-            this.imageId, this.maskMode, this.processingMode, transfer);
-          this.processedImageUri = await ProcessedImageService.cache(this.abilityContext(), masked.image);
-          this.statusMessage = '远程处理完成，请复核遮挡范围。';
-        } finally { this.resultMeta = '远程遮挡 · ' + transfer.describe(); }
+        await this.generateRemotePreview();
       } else {
         throw new Error(this.processingMode === 'local_only'
-          ? '仅本地模式只能遮挡二维码；切换到联网分析并重新选择图片后，可检测并遮挡文字与人物。'
-          : '请重新选择图片并完成联网授权，再生成安全预览。');
+          ? '仅本地模式下只能遮挡二维码；切换到联网分析并重新选择图片后，可检测并遮挡文字与人物。'
+          : '本次还没有可用的检测结果。请重新选择图片，并在联网授权弹窗中选择「同意并继续」。');
       }
       this.processed = true;
       await HistoryStore.updateProcessed(this.abilityContext(), this.historyRecordId, this.statusMessage);
@@ -177,6 +186,64 @@ struct PrivacyPage {
       this.statusMessage = reason;
       await this.showNotice('无法生成安全预览', reason);
     } finally { this.scanning = false; }
+  }
+
+  /**
+   * Online path. The enhancement may already have failed — the server then says
+   * online analysis failed at the top of the page — and the previous code told
+   * the user to re-authorise and retry, which reproduced the same failure.
+   *
+   * The confirmed local regions are used instead, and when the server cannot
+   * produce anything at all the device still masks what it can prove it found
+   * (the decoded QR areas), saying so plainly rather than leaving the preview
+   * button dead.
+   */
+  private async generateRemotePreview(): Promise<void> {
+    // Reaching here with decoded codes means the on-device QR mask was refused,
+    // i.e. some code has no trustworthy coordinates. The server's preview only
+    // covers what the analysis found, so it can leave that code readable —
+    // publishing a "safe" image with a live QR would be the worst outcome here.
+    if (this.qrReport.status === 'decoded') {
+      throw new Error('本机已解出二维码，但没有全部二维码的可靠坐标，'
+        + '联网预览可能漏掉二维码，因此不生成安全图。请对原图手工遮挡二维码后再分享。');
+    }
+    const transfer = this.imageTransfer;
+    const localCoverable = this.findings.length > 0;
+    try {
+      const masked = await GuardianApi.processAndDownloadImage(
+        this.imageId, this.maskMode, this.processingMode, transfer, localCoverable);
+      this.processedImageUri = await ProcessedImageService.cache(this.abilityContext(), masked.image);
+      this.statusMessage = '已用' + this.modeLabel(this.maskMode) + '遮挡检测到的敏感区域，请放大复核遮挡范围。';
+    } catch (error) {
+      if (!localCoverable) {
+        // Nothing was located, remotely or locally. Saying "no privacy regions
+        // were found" is the honest answer; a preview could only be invented.
+        throw new Error('本机与联网都没能定位到隐私区域，无法生成安全预览。'
+          + '可重新选择图片重试联网分析（失败多为一次性网络问题），或改用手机自带的图片编辑工具手工遮挡。');
+      }
+      const typedError = error as Error;
+      const reason: string = typedError.message ? typedError.message : '联网处理未完成';
+      await this.processQrOnlyLocally(reason);
+    } finally {
+      this.resultMeta = '远程遮挡 · ' + transfer.describe();
+    }
+  }
+
+  /** Last resort: mask the decoded QR areas on-device, and report the shortfall. */
+  private async processQrOnlyLocally(reason: string): Promise<void> {
+    if (this.qrReport.status !== 'decoded') {
+      throw new Error('联网处理失败，且本机没有可靠的遮挡坐标：' + reason);
+    }
+    try {
+      this.processedImageUri = await ProcessedImageService.maskQrCodesLocally(
+        this.abilityContext(), this.imageUri, this.qrReport);
+    } catch (fallbackError) {
+      const typedFallback = fallbackError as Error;
+      throw new Error('联网处理失败，端侧二维码遮挡也未成功：'
+        + (typedFallback.message ? typedFallback.message : reason));
+    }
+    this.statusMessage = '联网处理失败（' + reason + '）。已改用端侧不透明黑块遮挡二维码，'
+      + '文字与人物未遮挡，请放大复核后再分享。';
   }
 
   private async saveProcessedImage(): Promise<void> {
@@ -391,6 +458,21 @@ struct PrivacyPage {
                     .padding(12)
                     .backgroundColor(this.processed ? '#F0FDF4' : '#FEF2F2')
                     .borderRadius(12)
+                    .margin({ top: 10 })
+                    .width('100%')
+                }
+
+                // A failed enhancement must stay visible where the remedy is:
+                // the alternative was a one-shot dialog and a preview button
+                // that kept failing for a reason the user could not name.
+                if (this.detectorDetail.length > 0) {
+                  Text('联网失败原因：' + this.detectorDetail)
+                    .fontSize(11)
+                    .fontColor('#92400E')
+                    .lineHeight(17)
+                    .padding(10)
+                    .backgroundColor('#FFFBEB')
+                    .borderRadius(10)
                     .margin({ top: 10 })
                     .width('100%')
                 }

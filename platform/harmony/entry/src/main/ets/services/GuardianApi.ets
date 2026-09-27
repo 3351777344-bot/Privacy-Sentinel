@@ -117,7 +117,14 @@ export class GuardianApi {
     if (names.some((name: string): boolean => /\.(zip|rar|7z)$/i.test(name))) {
       throw new Error('不上传原始压缩包。请在代码页使用ZIP摘要增强；其他材料可单独选择。');
     }
-    const form: http.MultiFormData[] = [{ name: 'requirement_text', contentType: 'text/plain', data: requirement }];
+    // The server only runs the model when the request itself asks for online
+    // mode: "the page was in online mode" is not something the server can tell
+    // from a bare multipart body, and it must not guess — a local-only scan that
+    // silently spent model quota would break the local-only promise.
+    const form: http.MultiFormData[] = [
+      { name: 'processing_mode', contentType: 'text/plain', data: transfer.mode === 'online' ? 'online' : 'local' },
+      { name: 'requirement_text', contentType: 'text/plain', data: requirement }
+    ];
     let bytes = 0;
     for (let index = 0; index < uris.length; index++) {
       const data = await GuardianApi.readSelectedFile(uris[index], 10 * 1024 * 1024);
@@ -128,7 +135,10 @@ export class GuardianApi {
     }
     return GuardianApi.send<DocCheckResponse>('/api/doc/check', {
       method: http.RequestMethod.POST, header: { 'Content-Type': 'multipart/form-data' }, multiFormDataList: form
-    }, transfer, `将你选择的 ${uris.length} 份材料、文件名和填写的提交要求发送到在线服务，进行安全分析。`);
+    }, transfer, transfer.mode === 'online'
+      ? `将你选择的 ${uris.length} 份材料、文件名和填写的提交要求发送到在线服务，`
+        + '由在线 AI 识别要求并核对材料内容，然后进行安全分析。'
+      : `将你选择的 ${uris.length} 份材料、文件名和填写的提交要求发送到在线服务，进行安全分析。`);
   }
 
   static async detectPrivacy(uri: string, name: string, mode: ProcessingMode = 'local_only',
@@ -148,14 +158,23 @@ export class GuardianApi {
    * user-visible operation: one consent dialog, one transfer session, no retry.
    * Both requests are dispatched only after that single explicit approval, so
    * there is no unmetered GET path around the transfer policy.
+   *
+   * `localPreview` requests a preview built from the regions the local pass did
+   * find. It is only sent after the online analysis produced nothing, so the
+   * user is not left with a preview button that can never work; the flag is
+   * explicit because it is a deliberate downgrade of the coverage promise, and
+   * the page says so in the same breath.
    */
   static async processAndDownloadImage(imageId: string, maskType: string, mode: ProcessingMode,
-    transfer: TransferSession = new TransferSession(mode)): Promise<MaskedImageResult> {
+    transfer: TransferSession = new TransferSession(mode),
+    localPreview: boolean = false): Promise<MaskedImageResult> {
     return transfer.runFollowUp<MaskedImageResult>(
       async (): Promise<MaskedImageResult> => {
         const processed = await GuardianApi.dispatch('/api/privacy/process', {
           method: http.RequestMethod.POST, header: { 'Content-Type': 'application/json' },
-          extraData: JSON.stringify({ imageId: imageId, scope: 'all', maskType: maskType, itemIds: [] })
+          extraData: JSON.stringify({
+            imageId: imageId, scope: 'all', maskType: maskType, itemIds: [], localPreview: localPreview
+          })
         });
         const response = JSON.parse(processed as string) as PrivacyProcessResponse;
         const image = await GuardianApi.dispatch(response.processedImageUrl, {

@@ -28,8 +28,15 @@ export interface DetectResult {
   riskLevel: RiskLevel;
   score: number;
   summary: string;
-  detectorMode: 'agent' | 'hybrid' | 'vision_api' | 'ocr' | 'demo' | 'unavailable';
+  detectorMode: 'agent' | 'hybrid' | 'vision_api' | 'ocr' | 'demo' | 'unavailable' | 'deepseek';
   detectorMessage: string;
+  /**
+   * Why the online analysis produced nothing, for support and logs only
+   * (`ok` / `vision_disabled` / `empty_result` / a transport or provider
+   * reason). Deliberately not rendered: the user-facing sentence is
+   * `detectorMessage`.
+   */
+  detectorDetail?: string;
   items: PrivacyItem[];
 }
 
@@ -149,18 +156,34 @@ export interface PaginatedHistory {
   limit: number;
 }
 
+export interface ParsedRequirements {
+  formats: string[];
+  namingRule?: string | null;
+  requiredMaterials: string[];
+  lengthRequirement?: string | null;
+  deadline?: string | null;
+  rawText: string;
+  /**
+   * Which engine produced these rules: `online` means the server let the model
+   * read the brief, `local` means the rule table did. Optional because a server
+   * predating the online pass does not send it.
+   */
+  source?: 'local' | 'online';
+  /** Fields the model supplied; anything missing fell back to the rules. */
+  sourceFields?: string[];
+  /** Substantive content requirements the model read out of prose. */
+  contentRequirements?: string[];
+  /** The model's own note about what the brief left ambiguous. */
+  notes?: string;
+  /** Set when the online pass was attempted and did not land. */
+  modelWarning?: string | null;
+}
+
 export interface DocCheckResponse {
   riskLevel: RiskLevel;
   score: number;
   summary: string;
-  parsedRequirements: {
-    formats: string[];
-    namingRule?: string | null;
-    requiredMaterials: string[];
-    lengthRequirement?: string | null;
-    deadline?: string | null;
-    rawText: string;
-  };
+  parsedRequirements: ParsedRequirements;
   files: Array<{
     fileName: string;
     extension: string;

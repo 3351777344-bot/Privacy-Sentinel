@@ -98,6 +98,23 @@ export interface ParsedRequirements {
   lengthRequirement: string | null;
   deadline: string | null;
   rawText: string;
+  /**
+   * Which engine produced these rules. `online` means the server let the model
+   * read the brief; `local` means the rule table did. Absent on responses from a
+   * server that predates the online pass, so treat undefined as `local`.
+   */
+  source?: 'local' | 'online';
+  /** Fields the model actually supplied; anything missing came from the rules. */
+  sourceFields?: string[];
+  /** Substantive content requirements only the model can read out of prose. */
+  contentRequirements?: string[];
+  /** The model's own note about what the brief left ambiguous. */
+  notes?: string;
+  /**
+   * Set when the online pass was attempted and did not land — the report was
+   * then produced by the on-device/server rules and says so.
+   */
+  modelWarning?: string | null;
 }
 
 export interface DocCheckResponse {
@@ -124,6 +141,12 @@ export interface DetectResponse {
   items: PrivacyItem[];
   detectorMode?: string;
   detectorMessage?: string;
+  /**
+   * Server-side reason why the online analysis produced nothing. For support
+   * and logs only — a diagnosis ("transport timeout", "provider rejected"),
+   * never a user-facing sentence, so it is not rendered in the page.
+   */
+  detectorDetail?: string;
 }
 
 export interface PrivacyProcessResponse {
