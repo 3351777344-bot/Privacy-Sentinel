@@ -4,6 +4,7 @@ import { ModuleCard } from '../components/ModuleCard';
 import { MODULES } from '../data/ModuleData';
 import { LocalHistoryRecord, ModuleDefinition, RiskLevel } from '../models/SecurityModels';
 import { HistoryStore } from '../services/HistoryStore';
+import { GuideStore } from '../services/GuideStore';
 
 @Entry
 @Component
@@ -16,6 +17,25 @@ struct Index {
 
   aboutToAppear(): void {
     this.loadHistory();
+    this.openFirstRunGuide();
+  }
+
+  /**
+   * Show the guide automatically once, on the first launch after install. The
+   * permanent entry below stays available afterwards, so nothing is lost if the
+   * user skips it.
+   */
+  private async openFirstRunGuide(): Promise<void> {
+    const seen: boolean = await GuideStore.hasSeenOnboarding(this.abilityContext());
+    if (seen) {
+      return;
+    }
+    try {
+      this.getUIContext().getRouter().pushUrl({ url: 'pages/OnboardingPage' });
+    } catch (_) {
+      // A failed navigation must not block the home page; the permanent entry
+      // below still opens the guide.
+    }
   }
 
   onPageShow(): void {
@@ -109,6 +129,46 @@ struct Index {
           .backgroundColor('#1D4ED8')
           .borderRadius(22)
           .width('100%')
+
+          Row() {
+            Text('?')
+              .fontSize(14)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('#2563EB')
+              .textAlign(TextAlign.Center)
+              .width(26)
+              .height(26)
+              .borderRadius(13)
+              .backgroundColor('#EFF6FF')
+            Column() {
+              Text('使用说明')
+                .fontSize(14)
+                .fontWeight(FontWeight.Medium)
+                .fontColor('#172033')
+                .width('100%')
+              Text('四个模块怎么用、什么时候会联网')
+                .fontSize(11)
+                .fontColor('#64748B')
+                .width('100%')
+                .margin({ top: 2 })
+            }
+            .alignItems(HorizontalAlign.Start)
+            .layoutWeight(1)
+            .margin({ left: 10 })
+            Text('›')
+              .fontSize(20)
+              .fontColor('#94A3B8')
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Center)
+          .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+          .backgroundColor('#FFFFFF')
+          .borderRadius(16)
+          .border({ width: 1, color: '#E2E8F0' })
+          .margin({ top: 12 })
+          .onClick(() => {
+            this.getUIContext().getRouter().pushUrl({ url: 'pages/GuidePage' });
+          })
 
           Row() {
             Text('四个安全入口')

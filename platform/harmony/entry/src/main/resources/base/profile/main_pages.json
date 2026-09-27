@@ -1,6 +1,8 @@
 {
   "src": [
     "pages/Index",
+    "pages/OnboardingPage",
+    "pages/GuidePage",
     "pages/PrivacyPage",
     "pages/CodePage",
     "pages/LinkPage",
