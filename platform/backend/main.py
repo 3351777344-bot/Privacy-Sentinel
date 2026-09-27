@@ -7,6 +7,7 @@ import zipfile
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +16,11 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 
 from config import settings
+from detector.doc_intent import (
+    judge_content_online,
+    merge_with_local,
+    parse_requirement_online,
+)
 from detector.privacy_agent import detect_privacy_items
 from image_processor.blur import apply_blur_mask
 from image_processor.mask import apply_black_mask
@@ -26,7 +32,7 @@ from modules.code_guardian.archive_scanner import (
     analyze_code_archive,
 )
 from modules.doc_shield.completeness_checker import check_completeness
-from modules.doc_shield.file_extractor import extract_file
+from modules.doc_shield.file_extractor import ExtractedFile, extract_file
 from modules.doc_shield.format_checker import check_format
 from modules.doc_shield.privacy_checker import check_privacy
 from modules.doc_shield.report_generator import generate_report
@@ -535,8 +541,10 @@ async def decode_link_qr(file: UploadFile = File(...)) -> QrDecodeResponse:
 
 @app.post("/api/doc/check", response_model=DocCheckResponse)
 async def check_doc(
+    request: Request,
     requirement_text: str = Form(...),
     files: list[UploadFile] = File(...),
+    processing_mode: str = Form(default="local"),
 ) -> DocCheckResponse:
     requirement_text = requirement_text.strip()
     if not requirement_text:
@@ -545,6 +553,10 @@ async def check_doc(
         raise HTTPException(status_code=400, detail="请至少上传一个材料文件。")
     if len(files) > settings.max_doc_files:
         raise HTTPException(status_code=413, detail=f"单次最多上传 {settings.max_doc_files} 个材料文件。")
+    if processing_mode not in {"local", "online"}:
+        raise HTTPException(status_code=400, detail="不支持的处理模式，请重新选择检查方式。")
+    if processing_mode == "online" and request.headers.get("X-Guardian-Consent") != "explicit":
+        raise HTTPException(status_code=403, detail="联网模型分析需要本次明确授权。")
 
     parsed_requirements = parse_requirement(requirement_text)
     extracted_files = []
@@ -563,14 +575,84 @@ async def check_doc(
         _validate_document_upload(file_name, content)
         extracted_files.append(extract_file(file_name, file.content_type, content))
 
+    online_checks: list[dict[str, Any]] = []
+    if processing_mode == "online":
+        # Both model calls are blocking, so they run off the event loop like the
+        # image detector does. A failure here never fails the request: the local
+        # rule result stands and the report carries the reason.
+        parsed_requirements, online_checks = await asyncio.to_thread(
+            _run_online_doc_analysis, requirement_text, parsed_requirements, extracted_files
+        )
+
     checks = [
         *check_format(extracted_files, parsed_requirements),
         *check_completeness(extracted_files, parsed_requirements),
+        *online_checks,
         *check_privacy(extracted_files),
     ]
     result = DocCheckResponse(**generate_report(parsed_requirements, extracted_files, checks))
     _append_analysis_history("doc", result.riskLevel, result.score, result.summary, result_json=result.model_dump_json())
     return result
+
+
+def _run_online_doc_analysis(
+    requirement_text: str,
+    local_requirements: dict[str, Any],
+    extracted_files: list[ExtractedFile],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Model-assisted requirement parse plus content verdicts.
+
+    Returns the requirement payload to check against and the extra check rows.
+    Every failure path returns the local rule payload with a warning, so the
+    caller cannot accidentally report model-derived rules that never arrived.
+    """
+    # The fallback is spelled out rather than left to the pydantic defaults: this
+    # dict is also the function's return contract, and a caller that serializes
+    # it directly must not produce a payload shaped differently from a successful
+    # run — the first version of this returned a dict with no `source` key at all.
+    def local_fallback(warning: str | None) -> dict[str, Any]:
+        fallback = dict(local_requirements)
+        fallback["source"] = "local"
+        fallback["sourceFields"] = []
+        fallback["contentRequirements"] = []
+        fallback["notes"] = ""
+        fallback["modelWarning"] = warning
+        return fallback
+
+    if not settings.deepseek_enabled or not settings.deepseek_api_key:
+        return local_fallback("联网解析未启用，本次报告仅依据本地规则。"), []
+
+    parsed, warning = parse_requirement_online(requirement_text)
+    if parsed is None:
+        return local_fallback(warning), []
+
+    content_items: list[dict[str, Any]] = []
+    judge_warning: str | None = None
+    if parsed.content_requirements:
+        verdicts, judge_warning = judge_content_online(
+            requirement_text, parsed.content_requirements, extracted_files
+        )
+        if not verdicts:
+            judge_warning = f"内容判定：{judge_warning or '联网内容判定未完成。'}"
+        content_items = [
+            {
+                "category": "completeness",
+                "label": item.label,
+                "evidence": item.evidence,
+                "riskLevel": item.risk_level,
+                "status": item.status,
+            }
+            for item in verdicts
+        ]
+
+    merged, _sources = merge_with_local(
+        parsed,
+        local_requirements,
+        parsed.content_requirements,
+        judge_warning or warning,
+    )
+    return merged, content_items
+
 
 
 @app.post("/api/doc/reputation", response_model=DocReputationResponse)
