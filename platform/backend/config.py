@@ -69,7 +69,10 @@ class Settings:
     deepseek_api_base: str = _str_env("GUARDIANHUB_DEEPSEEK_API_BASE", "https://api.deepseek.com")
     deepseek_enabled: bool = _bool_env("GUARDIANHUB_DEEPSEEK_ENABLED")
     deepseek_timeout_seconds: int = _int_env("GUARDIANHUB_DEEPSEEK_TIMEOUT_SECONDS", 60)
-    deepseek_max_tokens: int = _int_env("GUARDIANHUB_DEEPSEEK_MAX_TOKENS", 2048)
+    # Vision answers are JSON after the model's reasoning pass, so the ceiling has
+    # to leave room for both: too small and the completion comes back empty with
+    # finish_reason=length.
+    deepseek_max_tokens: int = _int_env("GUARDIANHUB_DEEPSEEK_MAX_TOKENS", 8192)
     vision_image_max_side: int = _int_env("GUARDIANHUB_VISION_IMAGE_MAX_SIDE", 1280)
 
 

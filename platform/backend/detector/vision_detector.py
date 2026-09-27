@@ -227,11 +227,16 @@ def _call_deepseek_vision(image_path: str) -> list[dict]:
         # curl call to DeepSeek (without it) reads the image correctly.
 
         response = client.chat.completions.create(**request)
-        content = response.choices[0].message.content
+        choice = response.choices[0]
+        content = choice.message.content
         payload = _extract_json_payload(content or "")
         if payload is None:
+            usage = getattr(response, "usage", None)
             logger.warning(
-                "DeepSeek vision returned unparseable content (first 200 chars): %r",
+                "DeepSeek vision returned unparseable content (finish_reason=%s, "
+                "completion_tokens=%s, first 200 chars): %r",
+                getattr(choice, "finish_reason", None),
+                getattr(usage, "completion_tokens", None),
                 (content or "")[:200],
             )
             return []
