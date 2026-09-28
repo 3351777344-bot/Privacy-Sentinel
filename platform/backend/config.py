@@ -1,4 +1,5 @@
 import os
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -6,6 +7,56 @@ from dotenv import load_dotenv
 
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+
+def _repo_root() -> Path:
+    """The checkout root this backend runs from (``platform/backend`` → repo)."""
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def _detect_build_version() -> str:
+    """What code is actually running, so ``/api/health`` can be trusted.
+
+    The whole point of this field is to answer "is the deployment current?", and
+    a hand-maintained answer cannot: it goes stale the first time someone pulls
+    without editing it. That is not hypothetical — the first version of this
+    field was read from ``GUARDIANHUB_BUILD_VERSION`` in ``.env``, and the
+    deployed service reported the commit *before* the one it was running.
+
+    So the commit is read from git, the only source that changes by itself.
+    ``-dirty`` when the checkout has local modifications (a hand-patched server
+    is a real deployment shape and must not look like a clean commit). The env
+    var still wins when set, for deployments that ship without ``.git``.
+    """
+    override = _str_env("GUARDIANHUB_BUILD_VERSION")
+    if override:
+        return override
+    try:
+        described = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=_repo_root(),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if described.returncode != 0:
+            return "unknown"
+        revision = described.stdout.strip()
+        if not revision:
+            return "unknown"
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=_repo_root(),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        dirty = status.returncode == 0 and status.stdout.strip()
+        return f"{revision}-dirty" if dirty else revision
+    except (OSError, subprocess.SubprocessError):
+        # git missing, .git absent (tarball deployment), or the call timed out:
+        # an unknown version must never stop the service from starting.
+        return "unknown"
 
 
 def _int_env(name: str, default: int) -> int:
@@ -39,7 +90,8 @@ def _origins_env() -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class Settings:
-    build_version: str = _str_env("GUARDIANHUB_BUILD_VERSION", "unknown") or "unknown"
+    # Read from git, not from a hand-maintained variable: see _detect_build_version.
+    build_version: str = _detect_build_version()
     cors_origins: tuple[str, ...] = _origins_env()
     max_image_bytes: int = _int_env("GUARDIANHUB_MAX_IMAGE_BYTES", 10 * 1024 * 1024)
     max_code_bytes: int = _int_env("GUARDIANHUB_MAX_CODE_BYTES", 1024 * 1024)

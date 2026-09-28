@@ -1,4 +1,5 @@
 from io import BytesIO
+import re
 import zipfile
 
 from fastapi.testclient import TestClient
@@ -33,7 +34,11 @@ def test_health_and_code_auto_detection() -> None:
     assert health.status_code == 200
     payload = health.json()
     assert payload["status"] == "ok"
-    assert payload["version"] == "unknown"
+    # The version identifies the running code, so it is a commit (possibly with
+    # a -dirty marker) or "unknown" when git is unavailable — never empty, and
+    # never a value that could silently go stale.
+    assert payload["version"] and payload["version"] != ""
+    assert re.fullmatch(r"([0-9a-f]{7,40}(-dirty)?|unknown)", payload["version"]), payload["version"]
     assert payload["buildTime"]
     assert payload["privacyDetector"]
     response = client.post("/api/code/analyze", json={"language": "auto", "code": "def hello():\n    return True"})

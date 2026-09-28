@@ -1,5 +1,6 @@
 import base64
 import json
+import subprocess
 from datetime import datetime, timedelta, timezone
 from dataclasses import replace
 
@@ -8,6 +9,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi.testclient import TestClient
 
+import config
 import main
 from modules.doc_shield.signed_feed import install, verify
 
@@ -34,6 +36,46 @@ def test_health_reports_configured_build_version(monkeypatch):
     payload = TestClient(main.app).get("/api/health").json()
     assert payload["version"] == "abc123"
     assert set(("status", "version", "buildTime", "privacyDetector")) <= payload.keys()
+
+
+def test_build_version_defaults_to_the_running_commit(monkeypatch):
+    """The default must come from git, not from a hand-maintained variable.
+
+    ``/api/health`` exists to answer "is this deployment current?". A manual value
+    goes stale the first time someone pulls without editing it, and that actually
+    happened: the deployed service reported the commit *before* the one it ran.
+    """
+    monkeypatch.delenv("GUARDIANHUB_BUILD_VERSION", raising=False)
+    monkeypatch.setattr(config, "load_dotenv", lambda *a, **k: None)  # keep a real .env out of the way
+
+    detected = config._detect_build_version()
+    if detected == "unknown":
+        pytest.skip("git or .git unavailable in this checkout")
+
+    head = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                          cwd=config._repo_root(), capture_output=True, text=True).stdout.strip()
+    assert head, "git 未能给出 HEAD"
+    assert detected.startswith(head), f"检测结果 {detected!r} 与 HEAD {head!r} 不符"
+    dirty = bool(subprocess.run(["git", "status", "--porcelain"],
+                                cwd=config._repo_root(), capture_output=True, text=True).stdout.strip())
+    assert detected.endswith("-dirty") is dirty
+
+
+def test_build_version_override_wins(monkeypatch):
+    """A checkout without .git still needs to be able to declare itself."""
+    monkeypatch.setenv("GUARDIANHUB_BUILD_VERSION", "release-2026-09-28")
+    assert config._detect_build_version() == "release-2026-09-28"
+
+
+def test_build_version_never_raises_without_git(monkeypatch):
+    """A version probe must not be able to stop the service from starting."""
+    monkeypatch.delenv("GUARDIANHUB_BUILD_VERSION", raising=False)
+
+    def explode(*args, **kwargs):
+        raise FileNotFoundError("git missing")
+
+    monkeypatch.setattr(config.subprocess, "run", explode)
+    assert config._detect_build_version() == "unknown"
 
 
 def envelope(key, version=1, days=1):

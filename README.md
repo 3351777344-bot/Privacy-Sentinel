@@ -59,8 +59,10 @@ curl -fsS https://api.guardianhub.tech/api/health
 完整配置见 `platform/.env.example`。
 
 部署完通过 `/api/health` 的 `version`、`buildTime` 和 `privacyDetector` 确认线上版本。
-`version` 来自部署时的 `GUARDIANHUB_BUILD_VERSION`，未设置时为 `unknown`，不会泄露服务器路径或环境变量。
-仍建议发一次最小真实业务请求确认核心链路：
+`version` **从 git 读取正在运行的提交**（短哈希；工作区有本地改动时带 `-dirty`），与 `git log -1`
+的对比就是「部署到位了吗」的判据；只有没有 `.git` 的部署才需要 `GUARDIANHUB_BUILD_VERSION` 覆盖
+——该字段一度是手工维护的环境变量，结果服务器上它报的是**上一个**提交，等于把要证明的事证伪了。
+`buildTime` 是进程启动时刻，用来确认服务确实重启过。仍建议发一次最小真实业务请求确认核心链路：
 
 ```bash
 curl -s -X POST https://api.guardianhub.tech/api/detect \
