@@ -34,13 +34,28 @@ try {
     [IO.File]::WriteAllText($config, "export const API_BASE_URL: string = '$($ApiBaseUrl.TrimEnd('/'))';")
   }
   $cli = Get-Command 'devecocli.cmd' -ErrorAction SilentlyContinue
-  if ($cli) {
-    & $cli.Source build --product default --modules entry@default --build-mode $BuildMode
-  } elseif ($DevEcoHome -and (Test-Path -LiteralPath (Join-Path $DevEcoHome 'tools/hvigor/bin/hvigorw.js'))) {
-    $env:DEVECO_SDK_HOME = Join-Path $DevEcoHome 'sdk'
-    & (Join-Path $DevEcoHome 'tools/node/node.exe') (Join-Path $DevEcoHome 'tools/hvigor/bin/hvigorw.js') --mode module -p product=default -p module=entry@default -p "buildMode=$BuildMode" assembleHap --no-daemon
-  } else { throw 'Install DevEco CLI or set DEVECO_HOME to the DevEco Studio installation.' }
-  if ($LASTEXITCODE -ne 0) { throw "Harmony build failed ($LASTEXITCODE)." }
+  # Both build tools report ordinary ArkTS warnings on stderr. PowerShell 7's
+  # $PSNativeCommandUseErrorActionPreference (default true since 7.3) turns a
+  # native command's stderr into an error record, which ErrorActionPreference
+  # 'Stop' then makes terminating: the script died *after* hvigor had succeeded
+  # and before the artifact checks below ran, reporting failure while the HAP on
+  # disk was fine. Redirection and the preference variable do not survive the
+  # invocation, so the preference is relaxed for exactly these two calls and the
+  # exit code stays the signal.
+  $nativePreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    if ($cli) {
+      & $cli.Source build --product default --modules entry@default --build-mode $BuildMode
+    } elseif ($DevEcoHome -and (Test-Path -LiteralPath (Join-Path $DevEcoHome 'tools/hvigor/bin/hvigorw.js'))) {
+      $env:DEVECO_SDK_HOME = Join-Path $DevEcoHome 'sdk'
+      & (Join-Path $DevEcoHome 'tools/node/node.exe') (Join-Path $DevEcoHome 'tools/hvigor/bin/hvigorw.js') --mode module -p product=default -p module=entry@default -p "buildMode=$BuildMode" assembleHap --no-daemon
+    } else { throw 'Install DevEco CLI or set DEVECO_HOME to the DevEco Studio installation.' }
+    $buildExitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $nativePreference
+  }
+  if ($buildExitCode -ne 0) { throw "Harmony build failed ($buildExitCode)." }
   # hvigor produces an unsigned HAP. Signing is a separate explicit step so
   # credentials never enter the tracked project configuration.
   $hapName = 'entry-default-unsigned.hap'

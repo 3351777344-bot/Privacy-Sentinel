@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit';
+import { promptAction } from '@kit.ArkUI';
 import { emitter } from '@kit.BasicServicesKit';
 import { AppHeader } from '../components/AppHeader';
 import { ProcessingModeSelector } from '../components/ProcessingModeSelector';
@@ -124,25 +125,59 @@ struct ShareCheckPage {
       this.multiImageHint = `已逐个扫描 ${total} 个文件，失败 ${failed} 个` +
         (overflow > 0 ? `；另有 ${overflow} 个超过单批 20 个上限，未扫描。` : '。');
       this.summary = this.multiImageHint + ' 批量报告不提供一键继续分享，请返回系统分享面板处理。';
+      await this.showCompletionPrompt(generation);
       return;
     }
     this.route = this.resolveRoute(intent);
     switch (this.route) {
       case 'image':
-        this.runImageRoute(intent.uris[0]);
+        await this.runImageRoute(intent.uris[0]);
         break;
       case 'doc':
-        this.runDocRoute(intent.uris[0]);
+        await this.runDocRoute(intent.uris[0]);
         break;
       case 'link':
-        this.runLinkRoute(this.extractUrl(intent));
+        await this.runLinkRoute(this.extractUrl(intent));
         break;
       case 'code':
-        this.runCodeRoute(intent.text);
+        await this.runCodeRoute(intent.text);
         break;
       default:
         this.phase = 'report';
         this.summary = '暂不支持该分享内容。请选择文件、图片、链接或代码片段。';
+    }
+    if (this.phase === 'report' && generation === this.gateGeneration && this.route !== 'unknown') {
+      await this.showCompletionPrompt(generation);
+    }
+  }
+
+  private async showCompletionPrompt(generation: number): Promise<void> {
+    if (generation !== this.gateGeneration || this.phase !== 'report') {
+      return;
+    }
+    try {
+      const result = await promptAction.showDialog({
+        title: '扫描已完成',
+        message: '是否返回软件主页面？选择“继续安全扫描”可留在当前报告中处理风险。',
+        buttons: [
+          { text: '进入软件主页面', color: '#2563EB' },
+          { text: '继续安全扫描', color: '#64748B' }
+        ]
+      });
+      if (result.index === 0) {
+        this.getUIContext().getRouter().replaceUrl({ url: 'pages/Index' });
+      }
+    } catch (_) {
+      // The completed report remains available if the dialog is unavailable.
+    }
+  }
+
+  private goHome(): void {
+    try {
+      this.getUIContext().getRouter().replaceUrl({ url: 'pages/Index' });
+    } catch (_) {
+      // Keep the report usable if navigation is unavailable in a degraded
+      // share-panel context.
     }
   }
 
@@ -266,10 +301,15 @@ struct ShareCheckPage {
     this.score = qr.status === 'failed' ? 0 : this.localScore(this.findings);
     this.riskLevel = qr.status === 'failed' ? 'medium' : this.localOverallRisk(this.findings);
     this.summary = `${qr.note} 未识别图片中的文字，文字隐私无法判断。`;
-    this.phase = 'report';
     if (enhance && this.mode === 'local_only') {
+      this.phase = 'report';
       this.summary += ' 当前为仅本地模式，未发送原图。';
     } else if (enhance && !qr.uploadBlocked) {
+      // Keep the gate visibly busy until the server response arrives. Moving
+      // to "report" before awaiting the request made a slow online scan look
+      // finished while work was still in flight.
+      this.phase = 'analyzing';
+      this.summary = '端侧检查已完成，正在等待联网增强结果…';
       try {
         const report = await GuardianApi.detectPrivacy(imageUri, 'shared-image.jpg', this.mode, this.imageTransfer);
         this.imageId = report.imageId;
@@ -282,8 +322,12 @@ struct ShareCheckPage {
       } catch (_) {
         this.summary += ' 增强分析未完成，保留本地结果；如已同意发送，数据可能已到达服务器。不自动重试。';
       }
+      this.phase = 'report';
     } else if (enhance) {
+      this.phase = 'report';
       this.summary += ' 敏感二维码禁止上传原图。';
+    } else {
+      this.phase = 'report';
     }
     await this.recordHistory('privacy', '隐私哨兵', this.riskLevel, this.score, this.summary);
   }
@@ -707,7 +751,9 @@ struct ShareCheckPage {
               this.mode = value;
               if (value === 'online' && this.route === 'image' &&
                 this.sourceUri.length > 0 && this.phase === 'report') {
-                this.runImageRoute(this.sourceUri, true);
+                this.runImageRoute(this.sourceUri, true).then(() => {
+                  this.showCompletionPrompt(this.gateGeneration);
+                });
               }
             } })
 
@@ -729,6 +775,25 @@ struct ShareCheckPage {
             emptyCopy: this.summary
           })
           .margin({ top: 12 })
+
+          if (this.phase === 'analyzing') {
+            Row() {
+              LoadingProgress()
+                .width(22)
+                .height(22)
+                .margin({ right: 10 })
+              Text(this.summary)
+                .fontSize(13)
+                .fontColor('#1D4ED8')
+                .lineHeight(20)
+                .layoutWeight(1)
+            }
+            .padding(14)
+            .backgroundColor('#EFF6FF')
+            .borderRadius(12)
+            .width('100%')
+            .margin({ top: 12 })
+          }
 
           if (this.phase === 'report' && this.route !== 'unknown') {
             Column() {
@@ -855,6 +920,7 @@ struct ShareCheckPage {
                     }
                     .width('100%')
                     .margin({ top: 10 })
+
                   }
 
                   Button('我已知晓风险，仍分享原图')
@@ -883,6 +949,18 @@ struct ShareCheckPage {
                       this.shareOriginalImage();
                     })
                 }
+
+                Button('返回软件主页面')
+                  .width('100%')
+                  .height(42)
+                  .fontSize(13)
+                  .fontColor('#1D4ED8')
+                  .backgroundColor('#EFF6FF')
+                  .borderRadius(11)
+                  .margin({ top: 12 })
+                  .onClick(() => {
+                    this.goHome();
+                  })
               }
             }
             .width('100%')
