@@ -29,7 +29,13 @@ def isolate_runtime_storage(tmp_path, monkeypatch):
 
 
 def test_health_and_code_auto_detection() -> None:
-    assert client.get("/api/health").status_code == 200
+    health = client.get("/api/health")
+    assert health.status_code == 200
+    payload = health.json()
+    assert payload["status"] == "ok"
+    assert payload["version"] == "unknown"
+    assert payload["buildTime"]
+    assert payload["privacyDetector"]
     response = client.post("/api/code/analyze", json={"language": "auto", "code": "def hello():\n    return True"})
     assert response.status_code == 200
     assert response.json()["language"] == "python"

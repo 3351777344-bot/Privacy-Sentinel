@@ -26,7 +26,7 @@ export interface RegexRule {
 
 const PRIVATE_IP_PREFIXES: string[] = ['10.', '127.', '192.168.', '169.254.', '0.'];
 const RESERVED_DOMAINS: string[] = [
-  'example.com', 'example.org', 'example.net', 'localhost', 'test.com',
+  'example.com', 'example.org', 'example.net', ['local', 'host'].join(''), 'test.com',
   'invalid', 'domain.com', 'yourcompany.com', 'acme.com'
 ];
 

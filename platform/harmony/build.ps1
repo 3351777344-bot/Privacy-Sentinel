@@ -18,8 +18,9 @@ $config = Join-Path $projectRoot 'entry/src/main/ets/services/ApiConfig.ets'
 $oldProfile = [IO.File]::ReadAllBytes($profile)
 $oldConfig = [IO.File]::ReadAllBytes($config)
 if ($BuildMode -eq 'release') {
-  if ($ApiBaseUrl -notmatch '^https://[a-zA-Z0-9.-]+(?::[0-9]+)?/?$') {
-    throw 'Release requires GUARDIANHUB_API_BASE_URL with an HTTPS origin.'
+  if ($ApiBaseUrl -notmatch '^https://[a-zA-Z0-9.-]+(?::[0-9]+)?/?$' -or
+      $ApiBaseUrl.TrimEnd('/') -ne 'https://api.guardianhub.tech') {
+    throw 'Release requires ApiBaseUrl=https://api.guardianhub.tech.'
   }
   if (-not (Test-Path -LiteralPath $localProfile)) {
     throw 'Release requires an untracked build-profile.local.json5 with rotated signing credentials.'
@@ -40,10 +41,43 @@ try {
     & (Join-Path $DevEcoHome 'tools/node/node.exe') (Join-Path $DevEcoHome 'tools/hvigor/bin/hvigorw.js') --mode module -p product=default -p module=entry@default -p "buildMode=$BuildMode" assembleHap --no-daemon
   } else { throw 'Install DevEco CLI or set DEVECO_HOME to the DevEco Studio installation.' }
   if ($LASTEXITCODE -ne 0) { throw "Harmony build failed ($LASTEXITCODE)." }
-  $hapName = if ($BuildMode -eq 'release') { 'entry-default-signed.hap' } else { 'entry-default-unsigned.hap' }
+  # hvigor produces an unsigned HAP. Signing is a separate explicit step so
+  # credentials never enter the tracked project configuration.
+  $hapName = 'entry-default-unsigned.hap'
   $hap = Join-Path $projectRoot "entry/build/default/outputs/default/$hapName"
   if (-not (Test-Path -LiteralPath $hap)) { throw "Expected artifact missing: $hapName" }
-  Get-FileHash -LiteralPath $hap -Algorithm SHA256
+  $bytes = [IO.File]::ReadAllBytes($hap)
+  if ($BuildMode -eq 'release') {
+    $zip = [IO.Compression.ZipFile]::OpenRead($hap)
+    try {
+      $text = New-Object Text.StringBuilder
+      foreach ($entry in $zip.Entries) {
+        $stream = $entry.Open()
+        try {
+          $buffer = New-Object IO.MemoryStream
+          $stream.CopyTo($buffer)
+          [void]$text.Append([Text.Encoding]::UTF8.GetString($buffer.ToArray()))
+        } finally {
+          $stream.Dispose()
+        }
+      }
+      $payload = $text.ToString()
+    } finally {
+      $zip.Dispose()
+    }
+    if ($payload -notmatch 'https://api\.guardianhub\.tech') {
+      throw 'Release HAP does not contain https://api.guardianhub.tech.'
+    }
+    foreach ($forbidden in @('10.0.2.2:8001', '127.0.0.1', 'localhost')) {
+      if ($payload -match [regex]::Escape($forbidden)) {
+        throw "Release HAP contains forbidden development address: $forbidden"
+      }
+    }
+  }
+  $hash = (Get-FileHash -LiteralPath $hap -Algorithm SHA256).Hash
+  Write-Host "HAP: $hap"
+  Write-Host "Size: $($bytes.Length) bytes"
+  Write-Host "SHA-256: $hash"
 } finally {
   [IO.File]::WriteAllBytes($profile, $oldProfile)
   [IO.File]::WriteAllBytes($config, $oldConfig)

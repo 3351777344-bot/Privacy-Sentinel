@@ -39,6 +39,7 @@ def _origins_env() -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class Settings:
+    build_version: str = _str_env("GUARDIANHUB_BUILD_VERSION", "unknown") or "unknown"
     cors_origins: tuple[str, ...] = _origins_env()
     max_image_bytes: int = _int_env("GUARDIANHUB_MAX_IMAGE_BYTES", 10 * 1024 * 1024)
     max_code_bytes: int = _int_env("GUARDIANHUB_MAX_CODE_BYTES", 1024 * 1024)

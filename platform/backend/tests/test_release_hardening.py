@@ -1,6 +1,7 @@
 import base64
 import json
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -26,6 +27,13 @@ def test_online_analysis_requires_explicit_consent(path, kwargs, forbidden_name,
         pytest.fail('analysis ran without consent')
     monkeypatch.setattr(main, forbidden_name, forbidden)
     assert TestClient(main.app).post(path, **kwargs).status_code == 403
+
+
+def test_health_reports_configured_build_version(monkeypatch):
+    monkeypatch.setattr(main, "settings", replace(main.settings, build_version="abc123"))
+    payload = TestClient(main.app).get("/api/health").json()
+    assert payload["version"] == "abc123"
+    assert set(("status", "version", "buildTime", "privacyDetector")) <= payload.keys()
 
 
 def envelope(key, version=1, days=1):

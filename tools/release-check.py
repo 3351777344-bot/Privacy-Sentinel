@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
@@ -172,6 +173,43 @@ def check_readme_links() -> list[str]:
     return failures
 
 
+def check_hap_contents() -> tuple[list[str], list[str]]:
+    """Check local HAP contents when build output is available."""
+    failures: list[str] = []
+    notes: list[str] = []
+    output_dir = root / HARMONY_OUTPUT
+    app_scope = (root / "platform/harmony/AppScope/app.json5").read_text(encoding="utf-8")
+    expected_bundle = re.search(r'"bundleName"\s*:\s*"([^"]+)"', app_scope)
+    expected_version_code = re.search(r'"versionCode"\s*:\s*(\d+)', app_scope)
+    expected_version_name = re.search(r'"versionName"\s*:\s*"([^"]+)"', app_scope)
+    for hap in sorted(output_dir.glob("*.hap")) if output_dir.is_dir() else []:
+        try:
+            with zipfile.ZipFile(hap) as archive:
+                payload = b"\n".join(archive.read(name) for name in archive.namelist())
+                module_name = next((name for name in archive.namelist() if name.endswith("module.json")), None)
+                module = json.loads(archive.read(module_name)) if module_name else {}
+        except (OSError, zipfile.BadZipFile, json.JSONDecodeError) as error:
+            failures.append(f"{hap}: 无法读取 HAP 内容（{error}）")
+            continue
+        if b"https://api.guardianhub.tech" not in payload:
+            failures.append(f"{hap}: 未包含生产 HTTPS 地址 https://api.guardianhub.tech")
+        for forbidden in (b"10.0.2.2:8001", b"127.0.0.1", b"localhost"):
+            if forbidden in payload:
+                failures.append(f"{hap}: 包含禁止的开发地址 {forbidden.decode()}")
+        app = module.get("app", module)
+        if expected_bundle and app.get("bundleName") and app["bundleName"] != expected_bundle.group(1):
+            failures.append(f"{hap}: bundleName 与 AppScope 不一致")
+        if expected_version_code and app.get("versionCode") not in (None, int(expected_version_code.group(1))):
+            failures.append(f"{hap}: versionCode 与 AppScope 不一致")
+        if expected_version_name and app.get("versionName") not in (None, expected_version_name.group(1)):
+            failures.append(f"{hap}: versionName 与 AppScope 不一致")
+        notes.append(
+            f"{hap.name} 地址与包元数据检查通过：{hap.stat().st_size} 字节，"
+            f"versionCode={app.get('versionCode', 'unknown')}，versionName={app.get('versionName', 'unknown')}"
+        )
+    return failures, notes
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -190,6 +228,9 @@ def main() -> int:
     artifact_failures, notes = check_artifacts(paths)
     failures += artifact_failures
     failures += check_readme_links()
+    hap_failures, hap_notes = check_hap_contents()
+    failures += hap_failures
+    notes += hap_notes
 
     for note in notes:
         print("note: " + note)

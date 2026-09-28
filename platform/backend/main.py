@@ -64,6 +64,7 @@ from storage.history_store import HistoryStore
 
 BASE_DIR = Path(__file__).resolve().parent
 logger = logging.getLogger("guardianhub")
+BUILD_TIME = datetime.now().astimezone().isoformat(timespec="seconds")
 UPLOAD_DIR = BASE_DIR / "static" / "uploads"
 PROCESSED_DIR = BASE_DIR / "static" / "processed"
 DETECTION_DIR = BASE_DIR / "data" / "detections"
@@ -282,6 +283,8 @@ def _validate_document_upload(file_name: str, content: bytes) -> None:
 def health() -> dict[str, str]:
     return {
         "status": "ok",
+        "version": settings.build_version,
+        "buildTime": BUILD_TIME,
         "message": "GuardianHub 服务运行正常",
         "privacyDetector": "demo" if settings.demo_mode else settings.privacy_engine,
     }

@@ -46,9 +46,11 @@ API 使用 8001，Web 使用 5174；8000 和 5173 属于 HekGemi，不要停止�
 
 ```bash
 cd /root/guardianhub
-git pull
+git pull --ff-only
+export GUARDIANHUB_BUILD_VERSION="$(git rev-parse --short HEAD)"
 systemctl restart guardianhub
 systemctl is-active guardianhub
+curl -fsS https://api.guardianhub.tech/api/health
 ```
 
 公网部署默认启用按客户端限流：`/api/*` 每客户端 600 次 / 60 秒，模型端点
@@ -56,9 +58,9 @@ systemctl is-active guardianhub
 只用于拦截脚本洪水；`GUARDIANHUB_RATE_LIMIT_ENABLED=false` 可整体关闭，重启服务即清空计数。
 完整配置见 `platform/.env.example`。
 
-部署完确认线上版本：`/api/health` 只说明进程活着，`privacyDetector` 也只反映引擎名，
-两者都不代表代码已更新，**必须发一次真实业务请求**。最快的判定是 `POST /api/detect`：
-响应里出现 `detectorDetail` 字段，说明线上已包含 `b7159fb` 之后的代码。
+部署完通过 `/api/health` 的 `version`、`buildTime` 和 `privacyDetector` 确认线上版本。
+`version` 来自部署时的 `GUARDIANHUB_BUILD_VERSION`，未设置时为 `unknown`，不会泄露服务器路径或环境变量。
+仍建议发一次最小真实业务请求确认核心链路：
 
 ```bash
 curl -s -X POST https://api.guardianhub.tech/api/detect \
