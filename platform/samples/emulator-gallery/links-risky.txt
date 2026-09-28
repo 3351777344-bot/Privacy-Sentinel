@@ -1,0 +1,6 @@
+GuardianHub 链接测试清单（仅做静态分析，不会主动访问）
+
+https://example.com
+http://example.com/login
+https://bit.ly/3example
+http://xn--campus-login.example/login?redirect=payment&token=demo123456789

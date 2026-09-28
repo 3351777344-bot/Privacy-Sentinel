@@ -9,6 +9,18 @@
 - `../backend/static/samples/privacy_sentinel_demo.png`
 - `../backend/static/samples/privacy_sentinel_demo_qr.png`
 
+## HarmonyOS 模拟器
+
+`emulator-gallery/` 是可直接放入模拟器文件管理器的四模块测试素材，包含图片、二维码、链接、危险代码、提交要求、课程论文和 ZIP。在已连接模拟器的情况下，一次命令即可生成 ZIP 并全部推送：
+
+```powershell
+cd platform/samples
+.\build-samples.ps1
+.\push-emulator-tests.ps1
+```
+
+脚本默认使用 `E:\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe`，也可以通过 `-Hdc` 指定路径；`-RemoteDir` 可改推送目标目录（默认 `/data/local/tmp/GuardianHubTests`）。素材清单与建议演示顺序见 `emulator-gallery/README-模拟器测试.txt`：在文件管理器中逐个选择并分享给 GuardianHub。
+
 ## Code Guardian
 
 `code-risky/` 包含刻意加入的安全问题。生成上传用 ZIP：
