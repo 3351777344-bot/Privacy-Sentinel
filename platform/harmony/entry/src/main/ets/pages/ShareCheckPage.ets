@@ -1,6 +1,4 @@
 import { common } from '@kit.AbilityKit';
-import { promptAction } from '@kit.ArkUI';
-import { emitter } from '@kit.BasicServicesKit';
 import { AppHeader } from '../components/AppHeader';
 import { ProcessingModeSelector } from '../components/ProcessingModeSelector';
 import { ResultPanel } from '../components/ResultPanel';
@@ -30,7 +28,6 @@ import { SHARE_INTENT_KEY, ShareIntent } from '../shareability/ShareCheckAbility
 type GateRoute = 'image' | 'doc' | 'link' | 'code' | 'unknown';
 type GatePhase = 'analyzing' | 'report' | 'processing' | 'offline';
 
-const SHARE_INTENT_CHANGE_EVENT_ID = 'guardianhub.shareIntentChange';
 const MAX_DOC_SCAN_BYTES = 12 * 1024 * 1024;
 
 interface GateResult {
@@ -77,9 +74,6 @@ struct ShareCheckPage {
   }
 
   aboutToAppear(): void {
-    emitter.on(SHARE_INTENT_CHANGE_EVENT_ID, () => {
-      this.runGate();
-    });
     this.runGate();
   }
 
@@ -125,7 +119,6 @@ struct ShareCheckPage {
       this.multiImageHint = `已逐个扫描 ${total} 个文件，失败 ${failed} 个` +
         (overflow > 0 ? `；另有 ${overflow} 个超过单批 20 个上限，未扫描。` : '。');
       this.summary = this.multiImageHint + ' 批量报告不提供一键继续分享，请返回系统分享面板处理。';
-      await this.showCompletionPrompt(generation);
       return;
     }
     this.route = this.resolveRoute(intent);
@@ -146,38 +139,19 @@ struct ShareCheckPage {
         this.phase = 'report';
         this.summary = '暂不支持该分享内容。请选择文件、图片、链接或代码片段。';
     }
-    if (this.phase === 'report' && generation === this.gateGeneration && this.route !== 'unknown') {
-      await this.showCompletionPrompt(generation);
-    }
   }
 
-  private async showCompletionPrompt(generation: number): Promise<void> {
-    if (generation !== this.gateGeneration || this.phase !== 'report') {
-      return;
-    }
+  private async goHome(): Promise<void> {
     try {
-      const result = await promptAction.showDialog({
-        title: '扫描已完成',
-        message: '是否返回软件主页面？选择“继续安全扫描”可留在当前报告中处理风险。',
-        buttons: [
-          { text: '进入软件主页面', color: '#2563EB' },
-          { text: '继续安全扫描', color: '#64748B' }
-        ]
+      const context = this.abilityContext();
+      await context.startAbility({
+        bundleName: 'com.guardianhub.campus',
+        moduleName: 'entry',
+        abilityName: 'EntryAbility'
       });
-      if (result.index === 0) {
-        this.getUIContext().getRouter().replaceUrl({ url: 'pages/Index' });
-      }
+      await context.terminateSelf();
     } catch (_) {
-      // The completed report remains available if the dialog is unavailable.
-    }
-  }
-
-  private goHome(): void {
-    try {
-      this.getUIContext().getRouter().replaceUrl({ url: 'pages/Index' });
-    } catch (_) {
-      // Keep the report usable if navigation is unavailable in a degraded
-      // share-panel context.
+      // Keep the report usable if the main ability cannot be opened.
     }
   }
 
@@ -751,9 +725,7 @@ struct ShareCheckPage {
               this.mode = value;
               if (value === 'online' && this.route === 'image' &&
                 this.sourceUri.length > 0 && this.phase === 'report') {
-                this.runImageRoute(this.sourceUri, true).then(() => {
-                  this.showCompletionPrompt(this.gateGeneration);
-                });
+                this.runImageRoute(this.sourceUri, true);
               }
             } })
 

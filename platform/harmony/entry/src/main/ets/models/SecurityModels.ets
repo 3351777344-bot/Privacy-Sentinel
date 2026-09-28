@@ -144,9 +144,10 @@ export interface DetectResponse {
   /**
    * Server-side reason why the online analysis produced nothing. For support
    * and logs only — a diagnosis ("transport timeout", "provider rejected"),
-   * never a user-facing sentence, so it is not rendered in the page.
+   * not a second user-facing message channel. The page only exposes non-"ok"
+   * values as troubleshooting detail.
    */
-  detectorDetail?: string;
+  detectorDetail?: string | null;
 }
 
 export interface PrivacyProcessResponse {

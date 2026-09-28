@@ -1,7 +1,6 @@
 import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { PrivacyLogger } from '../services/PrivacyLogger';
 import { window } from '@kit.ArkUI';
-import { emitter } from '@kit.BasicServicesKit';
 
 const DOMAIN = 0x4748;
 const TAG = 'GuardianHub.Share';
@@ -16,7 +15,6 @@ type PickerRecord = Record<string, string | number>;
 type PickerRecords = Record<string, PickerRecord[]>;
 
 export const SHARE_INTENT_KEY = 'guardianhub.shareIntent';
-const SHARE_INTENT_CHANGE_EVENT_ID = 'guardianhub.shareIntentChange';
 
 export function parseShareIntent(want: Want): ShareIntent {
   const uris: string[] = [];
@@ -88,13 +86,17 @@ export function parseShareIntent(want: Want): ShareIntent {
 }
 
 export default class ShareCheckAbility extends UIAbility {
+  private shareWindowStage?: window.WindowStage;
+
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     this.publishIntent(want);
   }
 
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     this.publishIntent(want);
-    emitter.emit(SHARE_INTENT_CHANGE_EVENT_ID);
+    if (this.shareWindowStage) {
+      this.loadSharePage(this.shareWindowStage);
+    }
   }
 
   private publishIntent(want: Want): void {
@@ -104,6 +106,15 @@ export default class ShareCheckAbility extends UIAbility {
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
+    this.shareWindowStage = windowStage;
+    this.loadSharePage(windowStage);
+  }
+
+  onWindowStageDestroy(): void {
+    this.shareWindowStage = undefined;
+  }
+
+  private loadSharePage(windowStage: window.WindowStage): void {
     windowStage.loadContent('pages/ShareCheckPage', (error) => {
       if (error.code) {
         PrivacyLogger.logScanError();

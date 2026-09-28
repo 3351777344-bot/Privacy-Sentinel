@@ -144,7 +144,7 @@ struct PrivacyPage {
     if (report.detectorMessage && report.detectorMessage.length > 0) {
       this.statusMessage = `${this.statusMessage}\n${report.detectorMessage}`;
     }
-    this.detectorDetail = report.detectorDetail !== undefined ? report.detectorDetail : '';
+    this.detectorDetail = report.detectorDetail ?? '';
     // The device cannot log free-form text (see PrivacyLogger), so a failed
     // online analysis is recorded with the history entry instead: that is the
     // user's own record, and it is where the reason stays reportable.
@@ -465,7 +465,7 @@ struct PrivacyPage {
                 // A failed enhancement must stay visible where the remedy is:
                 // the alternative was a one-shot dialog and a preview button
                 // that kept failing for a reason the user could not name.
-                if (this.detectorDetail.length > 0) {
+                if (this.detectorDetail.length > 0 && this.detectorDetail !== 'ok') {
                   Text('联网失败原因：' + this.detectorDetail)
                     .fontSize(11)
                     .fontColor('#92400E')
